@@ -3,16 +3,24 @@ import pandas as pd
 from datetime import datetime, time
 import os
 
-# --- 1. CONFIGURACIÓN (Aquí agregas/quitas personas fácilmente) ---
+# --- 1. CONFIGURACIÓN DE EQUIPOS (Edita aquí los nombres) ---
 EQUIPOS = {
-    "Ventas": ["Ana", "Carlos", "Beatriz", "David"],
-    "Soporte": ["Elena", "Fernando", "Gabriela"],
-    "Logística": ["Hugo", "Inés", "Javier"]
+    "Callcenter Bucaramanga": ["Ana", "Carlos", "Beatriz", "David"],
+    "Callcenter Medellin": ["Elena", "Fernando", "Gabriela"],
+    "Callcenter Bogota": ["Hugo", "Inés", "Javier"],
+    "Servicio al cliente": ["Kevin", "Laura", "Marta"],
+    "CallcenterMayoreo Medellin": ["Nancy", "Oscar", "Pablo"],
+    "Campo 6": ["Empleado 1", "Empleado 2"],
+    "Campo 7": ["Empleado A", "Empleado B"],
+    "Campo 8": ["Persona X", "Persona Y"],
+    "Campo 9": ["Agente 1", "Agente 2"],
+    "Campo 10": ["Nombre 1", "Nombre 2"],
+    "Campo 11": ["Test 1", "Test 2"]
 }
 
-# Configuración del horario de edición (Ej: de 8:00 AM a 9:00 AM)
-HORA_INICIO = time(8, 0)
-HORA_FIN = time(23, 59) # Puse un rango amplio para que lo pruebes, ajústalo a 1 hora (ej: 9, 0)
+# Configuración del horario (Lo dejé hasta las 11:59 PM para que pruebes ahora)
+HORA_INICIO = time(0, 0)   # Desde medianoche
+HORA_FIN = time(23, 59)    # Hasta el final del día
 ARCHIVO_DATOS = 'asistencia_historica.csv'
 
 # --- 2. FUNCIONES DE CARGA Y GUARDADO ---
@@ -30,81 +38,91 @@ def guardar_asistencia(df_nuevo):
 
 # --- 3. INTERFAZ DE USUARIO ---
 st.set_page_config(page_title="Control de Asistencia", layout="wide")
-st.title("📋 Malla de Asistencia Diaria")
+st.title("📋 Malla de Asistencia Diaria - Multiequipos")
 
-# Pestañas para separar la "Toma de lista" del "Dashboard"
+# Pestañas
 tab_asistencia, tab_dashboard = st.tabs(["⚡ Registrar Asistencia", "📊 Dashboard y Reportes"])
 
 with tab_asistencia:
-    # Lógica de restricción de tiempo
     ahora = datetime.now().time()
     
     if HORA_INICIO <= ahora <= HORA_FIN:
-        st.success(f"Sistema ABIERTO (Hora actual: {ahora.strftime('%H:%M')}). Tienes hasta las {HORA_FIN} para gestionar.")
+        st.success(f"Sistema ABIERTO. Tienes hasta las {HORA_FIN} para gestionar.")
         
         # Selector de equipo
-        equipo_sel = st.selectbox("Selecciona el Equipo a gestionar:", list(EQUIPOS.keys()))
+        equipo_sel = st.selectbox("Selecciona tu Equipo:", list(EQUIPOS.keys()))
         fecha_hoy = datetime.now().strftime("%Y-%m-%d")
         
-        st.write(f"### Asistencia: {equipo_sel} - Fecha: {fecha_hoy}")
+        st.write(f"### 👥 {equipo_sel} - Fecha: {fecha_hoy}")
         
-        # Crear la "Malla" para llenar
+        # Crear datos iniciales
         datos_equipo = []
         for persona in EQUIPOS[equipo_sel]:
             datos_equipo.append({
                 "Fecha": fecha_hoy,
                 "Equipo": equipo_sel,
                 "Nombre": persona,
-                "Estado": "Presente", # Valor por defecto
+                "Estado": "Presente", 
                 "Observacion": ""
             })
         
         df_input = pd.DataFrame(datos_equipo)
         
-        # Editor interactivo (La Malla)
+        # Editor interactivo
         df_editado = st.data_editor(
             df_input,
             column_config={
                 "Estado": st.column_config.SelectboxColumn(
                     "Estado",
-                    options=["Presente", "Ausente", "Tarde", "Licencia"],
+                    options=["Presente", "Ausente", "Tarde", "Licencia", "Vacaciones"],
                     required=True
-                )
+                ),
+                "Observacion": st.column_config.TextColumn("Observación")
             },
             hide_index=True,
-            num_rows="fixed"
+            num_rows="fixed",
+            use_container_width=True
         )
         
-        if st.button("Guardar Asistencia del Equipo"):
+        if st.button("💾 Guardar Asistencia"):
             guardar_asistencia(df_editado)
             st.toast(f"✅ Asistencia de {equipo_sel} guardada con éxito!")
             
     else:
-        st.error(f"⛔ El sistema está CERRADO. El horario de gestión es de {HORA_INICIO} a {HORA_FIN}.")
-        st.info("Contacta al administrador si necesitas realizar un cambio fuera de horario.")
+        st.error(f"⛔ El sistema está CERRADO. Horario: {HORA_INICIO} a {HORA_FIN}.")
 
 with tab_dashboard:
-    st.header("Visualización de Datos")
+    st.header("📊 Reporte General")
     df = cargar_datos()
     
     if not df.empty:
-        # Filtros básicos
-        col1, col2 = st.columns(2)
+        # Filtros
+        col1, col2, col3 = st.columns(3)
         with col1:
             filtro_equipo = st.multiselect("Filtrar por Equipo:", df["Equipo"].unique(), default=df["Equipo"].unique())
         with col2:
             filtro_estado = st.multiselect("Filtrar por Estado:", df["Estado"].unique(), default=df["Estado"].unique())
+        with col3:
+            fechas_disp = sorted(df["Fecha"].unique())
+            filtro_fecha = st.selectbox("Filtrar por Fecha:", fechas_disp, index=len(fechas_disp)-1)
         
-        df_filtrado = df[df["Equipo"].isin(filtro_equipo) & df["Estado"].isin(filtro_estado)]
+        # Aplicar filtros
+        df_filtrado = df[
+            df["Equipo"].isin(filtro_equipo) & 
+            df["Estado"].isin(filtro_estado) & 
+            (df["Fecha"] == filtro_fecha)
+        ]
         
-        # Métricas rápidas
-        t_asistencias = len(df_filtrado[df_filtrado['Estado'] == 'Presente'])
-        t_ausencias = len(df_filtrado[df_filtrado['Estado'] == 'Ausente'])
+        # Métricas
+        total = len(df_filtrado)
+        presentes = len(df_filtrado[df_filtrado['Estado'] == 'Presente'])
+        ausentes = len(df_filtrado[df_filtrado['Estado'] == 'Ausente'])
         
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Registros", len(df_filtrado))
-        m2.metric("Asistencias", t_asistencias)
-        m3.metric("Ausencias", t_ausencias, delta_color="inverse")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Personas", total)
+        m2.metric("✅ Presentes", presentes)
+        m3.metric("❌ Ausentes", ausentes, delta_color="inverse")
+        m4.metric("📅 Fecha", filtro_fecha)
         
         st.dataframe(df_filtrado, use_container_width=True)
     else:
