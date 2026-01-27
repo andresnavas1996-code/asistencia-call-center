@@ -12,7 +12,7 @@ EQUIPOS = {
 
 # Configuración del horario de edición (Ej: de 8:00 AM a 9:00 AM)
 HORA_INICIO = time(8, 0)
-HORA_FIN = time(17, 0) # Puse un rango amplio para que lo pruebes, ajústalo a 1 hora (ej: 9, 0)
+HORA_FIN = time(23, 59) # Puse un rango amplio para que lo pruebes, ajústalo a 1 hora (ej: 9, 0)
 ARCHIVO_DATOS = 'asistencia_historica.csv'
 
 # --- 2. FUNCIONES DE CARGA Y GUARDADO ---
