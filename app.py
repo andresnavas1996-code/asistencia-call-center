@@ -67,10 +67,9 @@ def guardar_asistencia(df_registro):
     df_final.to_csv(ARCHIVO_ASISTENCIA, index=False)
 
 def sobrescribir_asistencia_completa(df_completo):
-    """Esta función reescribe todo el archivo de asistencia (usada para borrar)"""
-    # Nos aseguramos de guardar solo las columnas originales, sin la columna 'Borrar'
+    """Reescribe el archivo con los datos corregidos"""
     cols_reales = ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]
-    # Filtramos por si acaso el DF trae columnas extra
+    # Aseguramos que solo guardamos las columnas validas (sin la columna 'Borrar')
     df_final = df_completo[cols_reales]
     df_final.to_csv(ARCHIVO_ASISTENCIA, index=False)
 
@@ -194,7 +193,7 @@ with tab_asistencia:
         st.error("⛔ Sistema Cerrado.")
 
 # ==========================================
-# PESTAÑA 3: HISTÓRICO (CON MODO CORRECCIÓN)
+# PESTAÑA 3: HISTÓRICO (MODO EDICIÓN TOTAL)
 # ==========================================
 with tab_reporte:
     st.header("Histórico y Correcciones")
@@ -202,47 +201,53 @@ with tab_reporte:
     
     if not df_hist.empty:
         # --- SWITCH PARA MODO EDICIÓN ---
-        modo_correccion = st.toggle("🛠️ ACTIVAR MODO CORRECCIÓN (Borrar filas individuales)")
+        modo_edicion = st.toggle("🛠️ ACTIVAR MODO EDICIÓN (Corregir datos o Borrar)")
         
-        if modo_correccion:
-            st.warning("⚠️ ESTÁS EN MODO CORRECCIÓN. Selecciona la casilla 'Borrar' de las filas que quieras eliminar y dale al botón rojo.")
+        if modo_edicion:
+            st.warning("⚠️ MODO EDICIÓN ACTIVO: Puedes cambiar nombres, cédulas, estados y observaciones directamente en la tabla. Marca 'Borrar' para eliminar la fila.")
             
             # Preparamos el DF para edición: Agregamos columna checkbox
             df_to_edit = df_hist.copy()
-            df_to_edit.insert(0, "Borrar", False) # Columna checkbox al inicio
+            df_to_edit.insert(0, "Borrar", False) 
             
-            # Editor FULL (Sin filtros para evitar errores de guardado parcial)
+            # CONFIGURACIÓN DEL EDITOR TOTAL
             edited_df = st.data_editor(
                 df_to_edit,
                 column_config={
-                    "Borrar": st.column_config.CheckboxColumn("¿Borrar?", help="Marca para eliminar", default=False),
-                    "Fecha": st.column_config.Column(disabled=True),
-                    "Equipo": st.column_config.Column(disabled=True),
-                    "Nombre": st.column_config.Column(disabled=True),
-                    "Estado": st.column_config.Column(disabled=True),
+                    "Borrar": st.column_config.CheckboxColumn("¿Borrar?", help="Marca para eliminar esta fila", default=False),
+                    "Fecha": st.column_config.Column(disabled=True), # Fecha bloqueada por seguridad
+                    "Equipo": st.column_config.Column(disabled=True), # Equipo bloqueado por seguridad
+                    # --- CAMPOS EDITABLES ---
+                    "Nombre": st.column_config.TextColumn("Nombre", required=True),
+                    "Cedula": st.column_config.TextColumn("Cédula"),
+                    "Estado": st.column_config.SelectboxColumn("Estado", options=["Asiste", "Ausente", "Llegada tarde", "Incapacidad", "Vacaciones"], required=True),
+                    "Observacion": st.column_config.TextColumn("Observación"),
+                    "Soporte": st.column_config.Column(disabled=True) # Soporte no editable aquí
                 },
-                disabled=["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"], # Todo bloqueado menos el checkbox
                 hide_index=True,
                 use_container_width=True,
-                key="editor_correccion"
+                key="editor_correccion_total"
             )
             
-            # Lógica de borrado
-            filas_a_borrar = edited_df[edited_df["Borrar"] == True]
-            
-            if not filas_a_borrar.empty:
-                st.error(f"Has marcado {len(filas_a_borrar)} registro(s) para eliminar.")
-                if st.button("🗑️ ELIMINAR REGISTROS MARCADOS PERMANENTEMENTE", type="primary"):
-                    # Filtramos el DF original quedándonos solo con los que NO tienen 'Borrar' == True
-                    df_final = edited_df[edited_df["Borrar"] == False]
-                    
-                    # Guardamos sobrescribiendo el archivo
-                    sobrescribir_asistencia_completa(df_final)
-                    st.success("✅ Registros eliminados correctamente.")
-                    st.rerun()
+            # BOTÓN ÚNICO PARA GUARDAR TODO (BORRADOS + CAMBIOS)
+            if st.button("💾 GUARDAR CAMBIOS Y BORRADOS", type="primary"):
+                # 1. Filtramos las filas que NO están marcadas para borrar
+                df_final = edited_df[edited_df["Borrar"] == False]
+                
+                # 2. Guardamos (Esto sobrescribe el archivo con las correcciones de texto y sin los borrados)
+                sobrescribir_asistencia_completa(df_final)
+                
+                # 3. Calculamos cuántos se borraron para dar feedback
+                borrados = len(edited_df) - len(df_final)
+                if borrados > 0:
+                    st.success(f"✅ Se guardaron los cambios y se eliminaron {borrados} registros.")
+                else:
+                    st.success("✅ Se guardaron las correcciones de datos exitosamente.")
+                
+                st.rerun()
             
         else:
-            # --- MODO VISUALIZACIÓN (Seguro, con filtros) ---
+            # --- MODO LECTURA (FILTROS ACTIVOS) ---
             col1, col2 = st.columns(2)
             with col1:
                 filtro_equipo = st.multiselect("Filtrar Equipo:", df_hist["Equipo"].unique())
@@ -272,7 +277,6 @@ with tab_reporte:
     else:
         st.info("No hay datos históricos.")
 
-    # Zona de Peligro (Reset Total)
     st.divider()
     with st.expander("☢️ ZONA DE PELIGRO (Reset Total)"):
         st.warning("Esto borra TODO el historial.")
