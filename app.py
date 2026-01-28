@@ -69,7 +69,6 @@ def guardar_asistencia(df_registro):
 def sobrescribir_asistencia_completa(df_completo):
     """Reescribe el archivo con los datos corregidos"""
     cols_reales = ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]
-    # Aseguramos que solo guardamos las columnas validas (sin la columna 'Borrar')
     df_final = df_completo[cols_reales]
     df_final.to_csv(ARCHIVO_ASISTENCIA, index=False)
 
@@ -92,10 +91,11 @@ st.title("📋 Sistema Integral de Asistencia")
 
 asegurar_archivos()
 
-tab_personal, tab_asistencia, tab_reporte = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "📊 HISTÓRICO"])
+# AHORA SON 4 PESTAÑAS
+tab_personal, tab_asistencia, tab_visual, tab_admin = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "👁️ VISUALIZAR HISTÓRICO", "🔐 ADMINISTRAR (CLAVE)"])
 
 # ==========================================
-# PESTAÑA 1: GESTIÓN
+# PESTAÑA 1: GESTIÓN PERSONAL
 # ==========================================
 with tab_personal:
     st.header("Actualización de Base de Datos")
@@ -193,17 +193,57 @@ with tab_asistencia:
         st.error("⛔ Sistema Cerrado.")
 
 # ==========================================
-# PESTAÑA 3: HISTÓRICO (MODO EDICIÓN TOTAL)
+# PESTAÑA 3: VISUALIZAR HISTÓRICO (Solo Lectura)
 # ==========================================
-with tab_reporte:
-    st.header("Histórico y Correcciones")
+with tab_visual:
+    st.header("👁️ Visualización de Registros")
     df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
     
     if not df_hist.empty:
-        # --- SWITCH PARA MODO EDICIÓN ---
-        modo_edicion = st.toggle("🛠️ ACTIVAR MODO EDICIÓN (Corregir datos o Borrar)")
+        col1, col2 = st.columns(2)
+        with col1:
+            filtro_equipo = st.multiselect("Filtrar Equipo:", df_hist["Equipo"].unique(), key="viz_equipo")
+        with col2:
+            filtro_fecha = st.multiselect("Filtrar Fecha:", df_hist["Fecha"].unique(), key="viz_fecha")
+            
+        df_show = df_hist.copy()
+        if filtro_equipo:
+            df_show = df_show[df_show["Equipo"].isin(filtro_equipo)]
+        if filtro_fecha:
+            df_show = df_show[df_show["Fecha"].isin(filtro_fecha)]
+            
+        # Tabla solo lectura (dataframe)
+        st.dataframe(df_show, use_container_width=True)
+        st.caption(f"Total registros encontrados: {len(df_show)}")
         
-        if modo_edicion:
+        # Visualizador de Soportes
+        st.divider()
+        df_con_soporte = df_show[df_show['Soporte'].notna() & (df_show['Soporte'].str.len() > 5)]
+        if not df_con_soporte.empty:
+            st.subheader("🔍 Visualizador de Soportes")
+            persona_ver = st.selectbox("Selecciona registro para ver soporte:", 
+                                     df_con_soporte['Nombre'] + " - " + df_con_soporte['Fecha'] + " (" + df_con_soporte['Estado'] + ")", key="viz_soporte")
+            if persona_ver:
+                datos_row = df_con_soporte[ (df_con_soporte['Nombre'] + " - " + df_con_soporte['Fecha'] + " (" + df_con_soporte['Estado'] + ")") == persona_ver ].iloc[0]
+                ruta_img = datos_row['Soporte']
+                if os.path.exists(ruta_img):
+                    st.image(Image.open(ruta_img), caption=f"Soporte de {datos_row['Nombre']}", width=400)
+    else:
+        st.info("No hay datos históricos para mostrar.")
+
+# ==========================================
+# PESTAÑA 4: ADMINISTRAR (Con Contraseña)
+# ==========================================
+with tab_admin:
+    st.header("🔐 Administración y Correcciones")
+    
+    clave_ingresada = st.text_input("Ingrese la clave de administrador:", type="password")
+    
+    if clave_ingresada == "1234":
+        st.success("Acceso concedido.")
+        
+        df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
+        if not df_hist.empty:
             st.warning("⚠️ MODO EDICIÓN ACTIVO: Puedes cambiar nombres, cédulas, estados y observaciones directamente en la tabla. Marca 'Borrar' para eliminar la fila.")
             
             # Preparamos el DF para edición: Agregamos columna checkbox
@@ -215,71 +255,40 @@ with tab_reporte:
                 df_to_edit,
                 column_config={
                     "Borrar": st.column_config.CheckboxColumn("¿Borrar?", help="Marca para eliminar esta fila", default=False),
-                    "Fecha": st.column_config.Column(disabled=True), # Fecha bloqueada por seguridad
-                    "Equipo": st.column_config.Column(disabled=True), # Equipo bloqueado por seguridad
-                    # --- CAMPOS EDITABLES ---
+                    "Fecha": st.column_config.Column(disabled=True),
+                    "Equipo": st.column_config.Column(disabled=True),
                     "Nombre": st.column_config.TextColumn("Nombre", required=True),
                     "Cedula": st.column_config.TextColumn("Cédula"),
                     "Estado": st.column_config.SelectboxColumn("Estado", options=["Asiste", "Ausente", "Llegada tarde", "Incapacidad", "Vacaciones"], required=True),
                     "Observacion": st.column_config.TextColumn("Observación"),
-                    "Soporte": st.column_config.Column(disabled=True) # Soporte no editable aquí
+                    "Soporte": st.column_config.Column(disabled=True)
                 },
                 hide_index=True,
                 use_container_width=True,
-                key="editor_correccion_total"
+                key="editor_admin_total"
             )
             
-            # BOTÓN ÚNICO PARA GUARDAR TODO (BORRADOS + CAMBIOS)
+            # BOTÓN DE GUARDADO
             if st.button("💾 GUARDAR CAMBIOS Y BORRADOS", type="primary"):
-                # 1. Filtramos las filas que NO están marcadas para borrar
                 df_final = edited_df[edited_df["Borrar"] == False]
-                
-                # 2. Guardamos (Esto sobrescribe el archivo con las correcciones de texto y sin los borrados)
                 sobrescribir_asistencia_completa(df_final)
                 
-                # 3. Calculamos cuántos se borraron para dar feedback
                 borrados = len(edited_df) - len(df_final)
                 if borrados > 0:
-                    st.success(f"✅ Se guardaron los cambios y se eliminaron {borrados} registros.")
+                    st.success(f"✅ Se eliminaron {borrados} registros y se guardaron los cambios.")
                 else:
-                    st.success("✅ Se guardaron las correcciones de datos exitosamente.")
-                
+                    st.success("✅ Cambios guardados.")
                 st.rerun()
-            
-        else:
-            # --- MODO LECTURA (FILTROS ACTIVOS) ---
-            col1, col2 = st.columns(2)
-            with col1:
-                filtro_equipo = st.multiselect("Filtrar Equipo:", df_hist["Equipo"].unique())
-            with col2:
-                filtro_fecha = st.multiselect("Filtrar Fecha:", df_hist["Fecha"].unique())
-                
-            df_show = df_hist.copy()
-            if filtro_equipo:
-                df_show = df_show[df_show["Equipo"].isin(filtro_equipo)]
-            if filtro_fecha:
-                df_show = df_show[df_show["Fecha"].isin(filtro_fecha)]
-                
-            st.dataframe(df_show, use_container_width=True)
-            
-            # Visualizador de Soportes
-            st.divider()
-            df_con_soporte = df_show[df_show['Soporte'].notna() & (df_show['Soporte'].str.len() > 5)]
-            if not df_con_soporte.empty:
-                st.subheader("🔍 Visualizador de Soportes")
-                persona_ver = st.selectbox("Selecciona registro para ver soporte:", 
-                                         df_con_soporte['Nombre'] + " - " + df_con_soporte['Fecha'] + " (" + df_con_soporte['Estado'] + ")")
-                if persona_ver:
-                    datos_row = df_con_soporte[ (df_con_soporte['Nombre'] + " - " + df_con_soporte['Fecha'] + " (" + df_con_soporte['Estado'] + ")") == persona_ver ].iloc[0]
-                    ruta_img = datos_row['Soporte']
-                    if os.path.exists(ruta_img):
-                        st.image(Image.open(ruta_img), caption=f"Soporte de {datos_row['Nombre']}", width=400)
-    else:
-        st.info("No hay datos históricos.")
 
-    st.divider()
-    with st.expander("☢️ ZONA DE PELIGRO (Reset Total)"):
-        st.warning("Esto borra TODO el historial.")
-        if st.button("🔴 BORRAR TODO", type="primary"):
-            borrar_historial_completo()
-            st.rerun()
+            # ZONA DE PELIGRO
+            st.divider()
+            with st.expander("☢️ ZONA DE PELIGRO (Reset Total)"):
+                st.warning("Esto borra TODO el historial.")
+                if st.button("🔴 BORRAR TODO", type="primary"):
+                    borrar_historial_completo()
+                    st.rerun()
+        else:
+            st.info("No hay datos históricos para administrar.")
+            
+    elif clave_ingresada:
+        st.error("Clave incorrecta. Acceso denegado.")
