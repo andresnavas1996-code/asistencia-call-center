@@ -4,26 +4,43 @@ from datetime import datetime, time
 import os
 from PIL import Image
 
-# --- 1. CONFIGURACIÓN ---
+# --- 1. CONFIGURACIÓN Y CLAVES ---
 HORA_INICIO = time(0, 0)
 HORA_FIN = time(23, 59)
 ARCHIVO_ASISTENCIA = 'asistencia_historica.csv'
 ARCHIVO_EMPLEADOS = 'base_datos_empleados.csv'
 CARPETA_SOPORTES = 'soportes_img' 
 
-# Equipos iniciales
-EQUIPOS_INICIALES = {
-    "Callcenter Bucaramanga": ["Ana", "Carlos", "Beatriz", "David"],
-    "Callcenter Medellin": ["Elena", "Fernando", "Gabriela"],
-    "Callcenter Bogota": ["Hugo", "Inés", "Javier"],
-    "Servicio al cliente": ["Kevin", "Laura", "Marta"],
-    "CallcenterMayoreo Medellin": ["Nancy", "Oscar", "Pablo"],
-    "Campo 6": ["Empleado 1", "Empleado 2"],
-    "Campo 7": ["Empleado A", "Empleado B"],
-    "Campo 8": ["Persona X", "Persona Y"],
-    "Campo 9": ["Agente 1", "Agente 2"],
-    "Campo 10": ["Nombre 1", "Nombre 2"],
-    "Campo 11": ["Test 1", "Test 2"]
+# LISTA DE EQUIPOS
+EQUIPOS_LISTA = [
+    "Callcenter Bucaramanga",      # Clave: 1
+    "Callcenter Medellin",         # Clave: 2
+    "Callcenter Bogota",           # Clave: 3
+    "Servicio al cliente",         # Clave: 4
+    "CallcenterMayoreo Medellin",  # Clave: 5
+    "Campo 6",                     # Clave: 6
+    "Campo 7",                     # Clave: 7
+    "Campo 8",                     # Clave: 8
+    "Campo 9",                     # Clave: 9
+    "Campo 10",                    # Clave: 10
+    "Campo 11"                     # Clave: 11
+]
+
+# MAPEO DE CLAVES (Aquí puedes cambiarlas después)
+# Formato: "CONTRASEÑA" : "NOMBRE EXACTO DEL EQUIPO"
+USUARIOS = {
+    "1": "Callcenter Bucaramanga",
+    "2": "Callcenter Medellin",
+    "3": "Callcenter Bogota",
+    "4": "Servicio al cliente",
+    "5": "CallcenterMayoreo Medellin",
+    "6": "Campo 6",
+    "7": "Campo 7",
+    "8": "Campo 8",
+    "9": "Campo 9",
+    "10": "Campo 10",
+    "11": "Campo 11",
+    "1234": "ADMIN" # Clave maestra
 }
 
 # --- 2. FUNCIONES ---
@@ -34,10 +51,11 @@ def asegurar_archivos():
         
     if not os.path.exists(ARCHIVO_EMPLEADOS):
         datos_lista = []
-        for equipo, nombres in EQUIPOS_INICIALES.items():
-            for nombre in nombres:
-                datos_lista.append({"Equipo": equipo, "Nombre": nombre, "Cedula": ""})
-        pd.DataFrame(datos_lista).to_csv(ARCHIVO_EMPLEADOS, index=False)
+        for equipo in EQUIPOS_LISTA:
+            # Creamos datos semilla vacíos o con nombres genéricos si se desea
+            pass 
+        # Creamos el archivo vacío con cabeceras si no existe
+        pd.DataFrame(columns=["Equipo", "Nombre", "Cedula"]).to_csv(ARCHIVO_EMPLEADOS, index=False)
     
     if not os.path.exists(ARCHIVO_ASISTENCIA):
         pd.DataFrame(columns=["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]).to_csv(ARCHIVO_ASISTENCIA, index=False)
@@ -86,19 +104,64 @@ def borrar_historial_completo():
 
 # --- 3. INTERFAZ ---
 st.set_page_config(page_title="Gestión Asistencia", layout="wide")
-st.title("📋 Sistema Integral de Asistencia")
+
+# ESTADO DE SESIÓN (LOGIN)
+if 'usuario' not in st.session_state:
+    st.session_state['usuario'] = None
+
+# --- PANTALLA DE LOGIN ---
+if st.session_state['usuario'] is None:
+    st.title("🔐 Ingreso al Sistema")
+    st.markdown("Por favor ingrese la clave asignada a su equipo.")
+    
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        password = st.text_input("Contraseña:", type="password")
+        if st.button("Ingresar"):
+            if password in USUARIOS:
+                st.session_state['usuario'] = USUARIOS[password]
+                st.rerun()
+            else:
+                st.error("Contraseña incorrecta.")
+    st.stop() # Detiene la ejecución aquí si no está logueado
+
+# --- APLICACIÓN PRINCIPAL (SOLO SI ESTÁ LOGUEADO) ---
+
+usuario_actual = st.session_state['usuario']
+es_admin = (usuario_actual == "ADMIN")
+
+# Barra lateral con Info y Logout
+with st.sidebar:
+    st.write(f"Hola, **{usuario_actual}**")
+    if st.button("Cerrar Sesión"):
+        st.session_state['usuario'] = None
+        st.rerun()
+
+st.title(f"📋 Asistencia: {usuario_actual if not es_admin else 'Vista Global'}")
 
 asegurar_archivos()
 
-# PESTAÑAS
-tab_personal, tab_asistencia, tab_visual, tab_admin = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "📊 DASHBOARD HISTÓRICO", "🔐 ADMINISTRAR"])
+# Definir pestañas según el rol
+if es_admin:
+    tab_personal, tab_asistencia, tab_visual, tab_admin = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "📊 DASHBOARD GLOBAL", "🔐 ADMINISTRAR BD"])
+else:
+    # Los usuarios normales ven menos pestañas y sin la de Admin
+    tab_personal, tab_asistencia, tab_visual = st.tabs(["👥 MI EQUIPO", "⚡ TOMAR ASISTENCIA", "📊 MI DASHBOARD"])
 
 # ==========================================
-# PESTAÑA 1: GESTIÓN PERSONAL
+# PESTAÑA 1: GESTIÓN PERSONAL (DB)
 # ==========================================
 with tab_personal:
-    st.header("Actualización de Base de Datos")
-    equipo_gest = st.selectbox("Selecciona Equipo a Editar:", list(EQUIPOS_INICIALES.keys()), key="sel_gest")
+    st.header("Base de Datos de Empleados")
+    
+    # LOGICA DE SEGURIDAD DE EQUIPO
+    if es_admin:
+        equipo_gest = st.selectbox("Selecciona Equipo a Editar:", EQUIPOS_LISTA, key="sel_gest")
+    else:
+        # Si no es admin, el equipo está fijo y bloqueado
+        equipo_gest = usuario_actual
+        st.info(f"Gestionando personal de: **{equipo_gest}**")
+
     df_db = cargar_csv(ARCHIVO_EMPLEADOS)
     df_equipo = df_db[df_db['Equipo'] == equipo_gest][['Nombre', 'Cedula']]
     
@@ -123,10 +186,17 @@ with tab_asistencia:
     ahora = datetime.now().time()
     
     if HORA_INICIO <= ahora <= HORA_FIN:
-        equipo_asist = st.selectbox("Selecciona Equipo:", list(EQUIPOS_INICIALES.keys()), key="sel_asist")
+        
+        # LOGICA DE SEGURIDAD DE EQUIPO
+        if es_admin:
+            equipo_asist = st.selectbox("Selecciona Equipo:", EQUIPOS_LISTA, key="sel_asist")
+        else:
+            equipo_asist = usuario_actual
+            # No mostramos selectbox, solo el título
+        
         fecha_hoy = datetime.now().strftime("%Y-%m-%d")
         
-        # Lógica de Cola: Empleados - Historial Hoy
+        # Lógica de Cola
         df_db = cargar_csv(ARCHIVO_EMPLEADOS)
         df_personal_base = df_db[df_db['Equipo'] == equipo_asist]
         
@@ -146,7 +216,7 @@ with tab_asistencia:
             df_input['Observacion'] = ""
             df_input['Soporte'] = None
             
-            st.info(f"📅 Fecha: {fecha_hoy} | ⏳ Pendientes: {len(df_input)}")
+            st.info(f"📅 Fecha: {fecha_hoy} | ⏳ Pendientes por gestionar en {equipo_asist}: {len(df_input)}")
             
             df_asistencia_editada = st.data_editor(
                 df_input,
@@ -166,7 +236,7 @@ with tab_asistencia:
             archivos_subidos = {}
             
             if not novedades.empty:
-                st.warning("⚠️ Carga los soportes para las novedades:")
+                st.warning("⚠️ Carga los soportes:")
                 with st.expander("📂 ZONA DE CARGA", expanded=True):
                     cols = st.columns(3)
                     i = 0
@@ -202,47 +272,58 @@ with tab_asistencia:
                 else:
                     st.warning("Selecciona un estado para guardar.")
         else:
-            st.success("🎉 Todo gestionado hoy.")
-            st.balloons()
+            if not df_personal_base.empty:
+                st.success(f"🎉 Todo el equipo {equipo_asist} ha sido gestionado hoy.")
+                st.balloons()
+            else:
+                st.warning("Este equipo aún no tiene personal en la Base de Datos. Ve a la primera pestaña para agregar gente.")
     else:
         st.error("⛔ Sistema Cerrado.")
 
 # ==========================================
-# PESTAÑA 3: DASHBOARD HISTÓRICO (MEJORADA)
+# PESTAÑA 3: DASHBOARD (FILTRADO POR SEGURIDAD)
 # ==========================================
 with tab_visual:
-    st.header("📊 Dashboard de Gestión")
+    st.header("📊 Dashboard de Resultados")
     df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
     
     if not df_hist.empty:
-        # --- FILTROS SUPERIORES ---
+        # LOGICA DE SEGURIDAD
+        if not es_admin:
+            # Si es usuario normal, forzamos el filtro a SU equipo
+            df_hist = df_hist[df_hist['Equipo'] == usuario_actual]
+            
         with st.container(border=True):
             col1, col2 = st.columns(2)
             with col1:
-                filtro_equipo = st.multiselect("Filtrar Equipo:", df_hist["Equipo"].unique(), key="viz_equipo")
+                # Si es Admin, ve el selector. Si es usuario, ve un texto fijo.
+                if es_admin:
+                    filtro_equipo = st.multiselect("Filtrar Equipo:", df_hist["Equipo"].unique(), key="viz_equipo")
+                else:
+                    st.markdown(f"**Equipo:** {usuario_actual}")
+                    filtro_equipo = [usuario_actual] # Preselección forzada invisible
+                    
             with col2:
                 filtro_fecha = st.multiselect("Filtrar Fecha:", df_hist["Fecha"].unique(), key="viz_fecha")
         
-        # Aplicar filtros
         df_show = df_hist.copy()
-        if filtro_equipo:
+        if es_admin and filtro_equipo:
             df_show = df_show[df_show["Equipo"].isin(filtro_equipo)]
         if filtro_fecha:
             df_show = df_show[df_show["Fecha"].isin(filtro_fecha)]
             
-        # --- KPIs (INDICADORES) ---
+        # KPIs
         total_regs = len(df_show)
         if total_regs > 0:
             asistencias = len(df_show[df_show['Estado'] == 'Asiste'])
             tardanzas = len(df_show[df_show['Estado'] == 'Llegada tarde'])
             incapacidades = len(df_show[df_show['Estado'] == 'Incapacidad'])
             ausencias = len(df_show[df_show['Estado'] == 'Ausente'])
-            
             porc_asistencia = (asistencias / total_regs) * 100
         else:
             asistencias, tardanzas, incapacidades, ausencias, porc_asistencia = 0, 0, 0, 0, 0
 
-        st.subheader("Indicadores Clave")
+        st.subheader("Indicadores")
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         kpi1.metric("Total Gestionados", total_regs)
         kpi2.metric("% Asistencia", f"{porc_asistencia:.1f}%")
@@ -251,57 +332,47 @@ with tab_visual:
         
         st.divider()
 
-        # --- GRÁFICOS ---
+        # GRÁFICOS
         col_graf1, col_graf2 = st.columns(2)
-        
         with col_graf1:
-            st.subheader("Distribución por Estado")
-            # Gráfico simple de barras contando estados
+            st.subheader("Estados")
             if not df_show.empty:
-                conteo_estados = df_show['Estado'].value_counts()
-                st.bar_chart(conteo_estados, color="#4CAF50") # Verde genérico
+                st.bar_chart(df_show['Estado'].value_counts(), color="#4CAF50")
             
         with col_graf2:
-            st.subheader("Registros por Equipo")
-            if not df_show.empty:
-                conteo_equipos = df_show['Equipo'].value_counts()
-                st.bar_chart(conteo_equipos, color="#2196F3") # Azul
+            if es_admin:
+                st.subheader("Comparativa por Equipos")
+                if not df_show.empty:
+                    st.bar_chart(df_show['Equipo'].value_counts(), color="#2196F3")
+            else:
+                st.info("Vista de equipo único.")
 
         st.divider()
-
-        # --- TABLA DETALLADA ---
-        st.subheader("📋 Detalle de Registros")
+        st.subheader("📋 Detalle")
         st.dataframe(df_show, use_container_width=True)
         
-        # --- VISUALIZADOR DE SOPORTES ---
-        st.subheader("🔍 Visualizador de Soportes")
+        st.subheader("🔍 Soportes")
         df_con_soporte = df_show[df_show['Soporte'].notna() & (df_show['Soporte'].str.len() > 5)]
         
         if not df_con_soporte.empty:
-            persona_ver = st.selectbox("Selecciona registro para ver soporte:", 
+            persona_ver = st.selectbox("Ver soporte de:", 
                                      df_con_soporte['Nombre'] + " - " + df_con_soporte['Fecha'] + " (" + df_con_soporte['Estado'] + ")", key="viz_soporte")
             if persona_ver:
                 datos_row = df_con_soporte[ (df_con_soporte['Nombre'] + " - " + df_con_soporte['Fecha'] + " (" + df_con_soporte['Estado'] + ")") == persona_ver ].iloc[0]
                 ruta_img = datos_row['Soporte']
                 if os.path.exists(ruta_img):
-                    st.image(Image.open(ruta_img), caption=f"Soporte de {datos_row['Nombre']}", width=400)
-                else:
-                    st.error("Imagen no encontrada en el servidor.")
-        else:
-            st.info("No hay soportes para mostrar en los filtros seleccionados.")
-            
+                    st.image(Image.open(ruta_img), caption=f"Soporte", width=400)
     else:
-        st.info("No hay datos históricos para mostrar aún.")
+        st.info("No hay datos históricos.")
 
 # ==========================================
-# PESTAÑA 4: ADMIN
+# PESTAÑA 4: ADMIN (SOLO VISIBLE PARA ADMIN)
 # ==========================================
-with tab_admin:
-    st.header("🔐 Administración")
-    clave_ingresada = st.text_input("Clave:", type="password")
-    
-    if clave_ingresada == "1234":
-        st.success("Acceso Admin Activo")
+if es_admin:
+    with tab_admin:
+        st.header("🔐 Administración Global")
+        st.info("Como Administrador (1234), tienes permisos totales para corregir errores.")
+        
         df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
         if not df_hist.empty:
             df_to_edit = df_hist.copy()
@@ -322,7 +393,7 @@ with tab_admin:
                 key="editor_admin_total"
             )
             
-            if st.button("💾 APLICAR CAMBIOS", type="primary"):
+            if st.button("💾 APLICAR CORRECCIONES", type="primary"):
                 df_final = edited_df[edited_df["Borrar"] == False]
                 sobrescribir_asistencia_completa(df_final)
                 st.success("Cambios aplicados.")
