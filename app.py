@@ -29,7 +29,7 @@ EQUIPOS_LISTA = [
 # MAPEO DE CLAVES (Aquí puedes cambiarlas después)
 # Formato: "CONTRASEÑA" : "NOMBRE EXACTO DEL EQUIPO"
 USUARIOS = {
-    "1": "Callcenter Bucaramanga",
+    "1111": "Callcenter Bucaramanga",
     "2": "Callcenter Medellin",
     "3": "Callcenter Bogota",
     "4": "Servicio al cliente",
