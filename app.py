@@ -42,7 +42,6 @@ def asegurar_archivos():
     if not os.path.exists(ARCHIVO_ASISTENCIA):
         pd.DataFrame(columns=["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]).to_csv(ARCHIVO_ASISTENCIA, index=False)
     else:
-        # Aseguramos compatibilidad si ya existía el archivo
         df_temp = pd.read_csv(ARCHIVO_ASISTENCIA)
         if "Soporte" not in df_temp.columns:
             df_temp["Soporte"] = None
@@ -77,13 +76,17 @@ def guardar_imagen(uploaded_file, nombre_persona, fecha):
         return ruta_completa
     return None
 
+def borrar_historial_completo():
+    """Borra el contenido del archivo de asistencia pero deja los encabezados"""
+    pd.DataFrame(columns=["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]).to_csv(ARCHIVO_ASISTENCIA, index=False)
+
 # --- 3. INTERFAZ ---
 st.set_page_config(page_title="Gestión Asistencia", layout="wide")
 st.title("📋 Sistema Integral de Asistencia")
 
 asegurar_archivos()
 
-tab_personal, tab_asistencia, tab_reporte = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "📊 HISTÓRICO CON SOPORTES"])
+tab_personal, tab_asistencia, tab_reporte = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "📊 HISTÓRICO"])
 
 # ==========================================
 # PESTAÑA 1: GESTIÓN
@@ -108,7 +111,7 @@ with tab_personal:
         st.rerun()
 
 # ==========================================
-# PESTAÑA 2: ASISTENCIA (Con tus nuevos estados)
+# PESTAÑA 2: ASISTENCIA (CORREGIDO PARA LLEGADA TARDE)
 # ==========================================
 with tab_asistencia:
     st.header("Registro Diario")
@@ -121,7 +124,7 @@ with tab_asistencia:
         
         if not df_personal_base.empty:
             df_input = df_personal_base[['Nombre', 'Cedula']].copy()
-            df_input['Estado'] = "Asiste" # Valor por defecto actualizado
+            df_input['Estado'] = "Asiste" # Valor por defecto
             df_input['Observacion'] = ""
             df_input['Soporte'] = None
             
@@ -133,7 +136,7 @@ with tab_asistencia:
                 column_config={
                     "Nombre": st.column_config.Column(disabled=True),
                     "Cedula": st.column_config.Column(disabled=True),
-                    # AQUI ESTÁN TUS NUEVAS OPCIONES:
+                    # TUS OPCIONES EXACTAS DE LA IMAGEN:
                     "Estado": st.column_config.SelectboxColumn("Estado", options=["Asiste", "Ausente", "Llegada tarde", "Incapacidad", "Vacaciones"], required=True),
                     "Observacion": st.column_config.TextColumn("Observación"),
                     "Soporte": st.column_config.Column(disabled=True)
@@ -143,7 +146,7 @@ with tab_asistencia:
                 key="editor_asistencia_dia"
             )
             
-            # 2. DETECTAR NOVEDADES (Actualizado a "Llegada tarde")
+            # 2. DETECTAR NOVEDADES (Llegada tarde o Incapacidad)
             novedades = df_asistencia_editada[df_asistencia_editada['Estado'].isin(["Llegada tarde", "Incapacidad"])]
             
             archivos_subidos = {}
@@ -189,7 +192,7 @@ with tab_asistencia:
         st.error("⛔ Sistema Cerrado.")
 
 # ==========================================
-# PESTAÑA 3: HISTÓRICO
+# PESTAÑA 3: HISTÓRICO (CON BOTÓN DE BORRAR)
 # ==========================================
 with tab_reporte:
     st.header("Histórico de Registros")
@@ -212,7 +215,8 @@ with tab_reporte:
         
         st.divider()
         st.subheader("🔍 Visualizador de Soportes")
-        df_con_soporte = df_show[df_show['Soporte'].str.len() > 5] 
+        # Filtramos solo rutas que no sean None y tengan algo escrito
+        df_con_soporte = df_show[df_show['Soporte'].notna() & (df_show['Soporte'].str.len() > 5)]
         
         if not df_con_soporte.empty:
             persona_ver = st.selectbox("Selecciona registro para ver soporte:", 
@@ -227,6 +231,15 @@ with tab_reporte:
                 else:
                     st.error("La imagen no se encuentra.")
         else:
-            st.info("No hay soportes para mostrar en la selección actual.")
+            st.info("No hay soportes visualizables en la selección actual.")
     else:
         st.info("No hay datos históricos.")
+
+    # --- ZONA DE PELIGRO ---
+    st.divider()
+    with st.expander("🗑️ ZONA DE PELIGRO (Borrar Histórico)"):
+        st.warning("⚠️ ESTA ACCIÓN NO SE PUEDE DESHACER. Se borrarán todas las asistencias tomadas hasta hoy.")
+        if st.button("🔴 BORRAR TODO EL HISTORIAL", type="primary"):
+            borrar_historial_completo()
+            st.success("Historial eliminado con éxito.")
+            st.rerun()
