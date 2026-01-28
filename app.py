@@ -13,7 +13,7 @@ CARPETA_SOPORTES = 'soportes_img'
 
 # LISTA DE EQUIPOS
 EQUIPOS_LISTA = [
-    "Callcenter Bucaramanga",      # Clave: 1
+    "Callcenter Bucaramanga",      # Clave: 1111
     "Callcenter Medellin",         # Clave: 2
     "Callcenter Bogota",           # Clave: 3
     "Servicio al cliente",         # Clave: 4
