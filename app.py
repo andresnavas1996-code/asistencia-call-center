@@ -3,8 +3,14 @@ import pandas as pd
 from datetime import datetime, time
 import os
 
-# --- 1. CONFIGURACIÓN ---
-EQUIPOS = {
+# --- CONFIGURACIÓN ---
+HORA_INICIO = time(0, 0)
+HORA_FIN = time(23, 59)
+ARCHIVO_ASISTENCIA = 'asistencia_historica.csv'
+ARCHIVO_EMPLEADOS = 'base_datos_empleados.csv'
+
+# Lista inicial (Solo se usará la primera vez para crear la base de datos)
+EQUIPOS_INICIALES = {
     "Callcenter Bucaramanga": ["Ana", "Carlos", "Beatriz", "David"],
     "Callcenter Medellin": ["Elena", "Fernando", "Gabriela"],
     "Callcenter Bogota": ["Hugo", "Inés", "Javier"],
@@ -18,71 +24,133 @@ EQUIPOS = {
     "Campo 11": ["Test 1", "Test 2"]
 }
 
-HORA_INICIO = time(0, 0)
-HORA_FIN = time(23, 59)
-ARCHIVO_DATOS = 'asistencia_historica.csv'
+# --- FUNCIONES DE BASE DE DATOS ---
 
-def cargar_datos():
-    if os.path.exists(ARCHIVO_DATOS):
-        return pd.read_csv(ARCHIVO_DATOS)
-    return pd.DataFrame(columns=["Fecha", "Equipo", "Nombre", "Estado", "Observacion"])
+def inicializar_empleados():
+    """Crea el archivo de empleados si no existe, usando la lista inicial."""
+    if not os.path.exists(ARCHIVO_EMPLEADOS):
+        datos_lista = []
+        for equipo, nombres in EQUIPOS_INICIALES.items():
+            for nombre in nombres:
+                datos_lista.append({
+                    "Equipo": equipo,
+                    "Nombre": nombre,
+                    "Cedula": "" # Cédula vacía para los antiguos
+                })
+        df_base = pd.DataFrame(datos_lista)
+        df_base.to_csv(ARCHIVO_EMPLEADOS, index=False)
+
+def cargar_empleados(equipo_filtro):
+    """Carga los empleados de un equipo específico desde el archivo maestro."""
+    if not os.path.exists(ARCHIVO_EMPLEADOS):
+        inicializar_empleados()
+    
+    df_todos = pd.read_csv(ARCHIVO_EMPLEADOS, dtype=str) # Leemos todo como texto para evitar errores
+    df_equipo = df_todos[df_todos['Equipo'] == equipo_filtro].copy()
+    return df_equipo
+
+def actualizar_base_empleados(df_nuevos_datos, equipo_actual):
+    """Detecta si hay gente nueva en el registro y la agrega a la base maestra."""
+    df_db = pd.read_csv(ARCHIVO_EMPLEADOS, dtype=str)
+    
+    # Recorremos los datos que acabas de llenar
+    cambios_realizados = False
+    for index, row in df_nuevos_datos.iterrows():
+        nombre = str(row['Nombre']).strip()
+        cedula = str(row['Cedula']).strip()
+        
+        # Verificamos si esta persona (Nombre + Equipo) ya existe en la DB
+        existe = ((df_db['Nombre'] == nombre) & (df_db['Equipo'] == equipo_actual)).any()
+        
+        if not existe and nombre and nombre != "nan":
+            # Si no existe, lo agregamos
+            nuevo_empleado = pd.DataFrame([{
+                "Equipo": equipo_actual, 
+                "Nombre": nombre, 
+                "Cedula": cedula
+            }])
+            df_db = pd.concat([df_db, nuevo_empleado], ignore_index=True)
+            cambios_realizados = True
+            
+    if cambios_realizados:
+        df_db.to_csv(ARCHIVO_EMPLEADOS, index=False)
 
 def guardar_asistencia(df_nuevo):
-    df_historico = cargar_datos()
+    if os.path.exists(ARCHIVO_ASISTENCIA):
+        df_historico = pd.read_csv(ARCHIVO_ASISTENCIA)
+    else:
+        df_historico = pd.DataFrame(columns=["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion"])
+        
     df_final = pd.concat([df_historico, df_nuevo], ignore_index=True)
-    df_final.to_csv(ARCHIVO_DATOS, index=False)
+    df_final.to_csv(ARCHIVO_ASISTENCIA, index=False)
 
-# --- 2. INTERFAZ ---
-st.set_page_config(page_title="Asistencia", layout="wide")
-st.title("📋 Malla de Asistencia Diaria - Dinámica")
+# --- INTERFAZ ---
+st.set_page_config(page_title="Control Asistencia", layout="wide")
+st.title("📋 Malla de Asistencia - Base de Datos Dinámica")
 
-# Crea las pestañas
-tab_asistencia, tab_dashboard = st.tabs(["⚡ Registrar Asistencia", "📊 Dashboard"])
+# Inicializamos la DB si es la primera vez que corre
+inicializar_empleados()
 
-# --- PESTAÑA DE REGISTRO ---
-with tab_asistencia:
+tab_registro, tab_reporte = st.tabs(["⚡ Registrar Asistencia", "📊 Dashboard"])
+
+# --- PESTAÑA 1: REGISTRO ---
+with tab_registro:
     ahora = datetime.now().time()
     
     if HORA_INICIO <= ahora <= HORA_FIN:
+        # Cargamos los equipos disponibles desde el archivo o la lista inicial
+        lista_equipos = list(EQUIPOS_INICIALES.keys())
+        
         col_sel, _ = st.columns([1, 2])
         with col_sel:
-            equipo_sel = st.selectbox("Selecciona tu Equipo:", list(EQUIPOS.keys()))
+            equipo_sel = st.selectbox("Selecciona tu Equipo:", lista_equipos)
         
-        st.info("💡 Usa la fila vacía al final para agregar personas nuevas.")
+        st.info("💡 Si agregas una persona nueva abajo, el sistema la GUARDARÁ para siempre en este equipo.")
         
-        # Prepara los datos base
-        datos = [{"Nombre": p, "Estado": "Presente", "Observacion": ""} for p in EQUIPOS[equipo_sel]]
-        df_input = pd.DataFrame(datos)
+        # 1. Cargamos los empleados guardados de este equipo
+        df_empleados = cargar_empleados(equipo_sel)
         
-        # Muestra la tabla editable
+        # 2. Preparamos el DataFrame para la edición
+        # Rellenamos columnas que faltan para el registro diario
+        df_input = df_empleados[['Nombre', 'Cedula']].copy()
+        df_input['Estado'] = "Presente"
+        df_input['Observacion'] = ""
+        
+        # 3. El Editor
         df_editado = st.data_editor(
             df_input,
             column_config={
-                "Nombre": st.column_config.TextColumn("Nombre", required=True),
-                "Estado": st.column_config.SelectboxColumn("Estado", options=["Presente", "Ausente", "Tarde", "Licencia"], required=True),
+                "Nombre": st.column_config.TextColumn("Nombre Completo", required=True),
+                "Cedula": st.column_config.TextColumn("Cédula / ID", required=True),
+                "Estado": st.column_config.SelectboxColumn("Estado", options=["Presente", "Ausente", "Tarde", "Licencia", "Vacaciones"], required=True),
                 "Observacion": st.column_config.TextColumn("Observación")
             },
             hide_index=True,
-            num_rows="dynamic",
-            use_container_width=True
+            num_rows="dynamic", # Permite agregar filas
+            use_container_width=True,
+            key="editor_asistencia"
         )
         
-        # Botón de guardar
-        if st.button("💾 Guardar Asistencia"):
+        # 4. Botón de Guardado
+        if st.button("💾 Guardar Asistencia y Actualizar Personal"):
             if not df_editado.empty:
+                # A) Primero actualizamos la base de datos de empleados (si hay nuevos)
+                actualizar_base_empleados(df_editado, equipo_sel)
+                
+                # B) Luego guardamos la asistencia de hoy
                 df_final = df_editado.copy()
                 df_final["Fecha"] = datetime.now().strftime("%Y-%m-%d")
                 df_final["Equipo"] = equipo_sel
-                guardar_asistencia(df_final[["Fecha", "Equipo", "Nombre", "Estado", "Observacion"]])
-                st.toast("✅ ¡Guardado con éxito!")
+                
+                # Ordenar columnas
+                cols = ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion"]
+                guardar_asistencia(df_final[cols])
+                
+                st.toast(f"✅ Datos guardados. Si agregaste personal nuevo, ya quedó registrado.")
+                
     else:
         st.error(f"⛔ Sistema Cerrado ({HORA_INICIO} - {HORA_FIN})")
 
-# --- PESTAÑA DE DASHBOARD ---
-with tab_dashboard:
-    df = cargar_datos()
-    if not df.empty:
-        st.metric("Total Registros", len(df))
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.info("Aún no hay datos.")
+# --- PESTAÑA 2: DASHBOARD ---
+with tab_reporte:
+    if os.path.
