@@ -136,7 +136,7 @@ with tab_asistencia:
                 column_config={
                     "Nombre": st.column_config.Column(disabled=True), # Bloqueado
                     "Cedula": st.column_config.Column(disabled=True), # Bloqueado
-                    "Estado": st.column_config.SelectboxColumn("Estado", options=["Presente", "Ausente", "Tarde", "Licencia", "Vacaciones"], required=True),
+                    "Estado": st.column_config.SelectboxColumn("Estado", options=["Asiste", "Ausente", "Llegada tarde", "Incapacidad", "Vacaciones"], required=True),
                     "Observacion": st.column_config.TextColumn("Observación")
                 },
                 hide_index=True,
