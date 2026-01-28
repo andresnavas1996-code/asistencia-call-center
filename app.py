@@ -67,7 +67,6 @@ def guardar_asistencia(df_registro):
     df_final.to_csv(ARCHIVO_ASISTENCIA, index=False)
 
 def sobrescribir_asistencia_completa(df_completo):
-    """Reescribe el archivo con los datos corregidos"""
     cols_reales = ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]
     df_final = df_completo[cols_reales]
     df_final.to_csv(ARCHIVO_ASISTENCIA, index=False)
@@ -91,7 +90,7 @@ st.title("📋 Sistema Integral de Asistencia")
 
 asegurar_archivos()
 
-# AHORA SON 4 PESTAÑAS
+# 4 PESTAÑAS: GESTIÓN, ASISTENCIA (COLA DE TRABAJO), VISUAL (SOLO LECTURA), ADMIN (EDITAR)
 tab_personal, tab_asistencia, tab_visual, tab_admin = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "👁️ VISUALIZAR HISTÓRICO", "🔐 ADMINISTRAR (CLAVE)"])
 
 # ==========================================
@@ -117,31 +116,52 @@ with tab_personal:
         st.rerun()
 
 # ==========================================
-# PESTAÑA 2: ASISTENCIA
+# PESTAÑA 2: ASISTENCIA (MODO COLA DE TRABAJO)
 # ==========================================
 with tab_asistencia:
-    st.header("Registro Diario")
+    st.header("Registro Diario (Pendientes)")
     ahora = datetime.now().time()
     
     if HORA_INICIO <= ahora <= HORA_FIN:
         equipo_asist = st.selectbox("Selecciona Equipo:", list(EQUIPOS_INICIALES.keys()), key="sel_asist")
+        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+        
+        # 1. Cargar empleados del equipo
         df_db = cargar_csv(ARCHIVO_EMPLEADOS)
         df_personal_base = df_db[df_db['Equipo'] == equipo_asist]
         
-        if not df_personal_base.empty:
-            df_input = df_personal_base[['Nombre', 'Cedula']].copy()
-            df_input['Estado'] = "Asiste"
+        # 2. Cargar historial de HOY para saber quién ya fue gestionado
+        df_historial = cargar_csv(ARCHIVO_ASISTENCIA)
+        ya_registrados = []
+        if not df_historial.empty:
+            ya_registrados = df_historial[
+                (df_historial['Fecha'] == fecha_hoy) & 
+                (df_historial['Equipo'] == equipo_asist)
+            ]['Nombre'].tolist()
+        
+        # 3. Filtrar: Solo mostramos los que NO están en "ya_registrados"
+        df_pendientes = df_personal_base[~df_personal_base['Nombre'].isin(ya_registrados)]
+        
+        if not df_pendientes.empty:
+            # Preparamos la tabla
+            df_input = df_pendientes[['Nombre', 'Cedula']].copy()
+            df_input['Estado'] = None # EMPIEZA VACÍO
             df_input['Observacion'] = ""
             df_input['Soporte'] = None
             
-            st.write(f"Gestionando: **{equipo_asist}**")
+            st.info(f"📅 Fecha: {fecha_hoy} | ⏳ Pendientes por gestionar: {len(df_input)}")
             
+            # EDITOR
             df_asistencia_editada = st.data_editor(
                 df_input,
                 column_config={
                     "Nombre": st.column_config.Column(disabled=True),
                     "Cedula": st.column_config.Column(disabled=True),
-                    "Estado": st.column_config.SelectboxColumn("Estado", options=["Asiste", "Ausente", "Llegada tarde", "Incapacidad", "Vacaciones"], required=True),
+                    "Estado": st.column_config.SelectboxColumn(
+                        "Estado (Seleccionar)", 
+                        options=["Asiste", "Ausente", "Llegada tarde", "Incapacidad", "Vacaciones"],
+                        required=True # Obliga a elegir algo si quieres guardar esa fila
+                    ),
                     "Observacion": st.column_config.TextColumn("Observación"),
                     "Soporte": st.column_config.Column(disabled=True)
                 },
@@ -150,12 +170,12 @@ with tab_asistencia:
                 key="editor_asistencia_dia"
             )
             
+            # Detectar novedades en lo que se está editando ahora
             novedades = df_asistencia_editada[df_asistencia_editada['Estado'].isin(["Llegada tarde", "Incapacidad"])]
-            
             archivos_subidos = {}
             
             if not novedades.empty:
-                st.warning("⚠️ ¡Atención! Se han detectado novedades. Por favor carga los soportes:")
+                st.warning("⚠️ Carga los soportes para las novedades seleccionadas:")
                 with st.expander("📂 ZONA DE CARGA DE SOPORTES", expanded=True):
                     cols = st.columns(3)
                     i = 0
@@ -164,39 +184,50 @@ with tab_asistencia:
                         estado = row['Estado']
                         with cols[i % 3]:
                             st.markdown(f"**{nombre}** ({estado})")
-                            file = st.file_uploader(f"Subir imagen para {nombre}", type=["png", "jpg", "jpeg"], key=f"file_{nombre}")
+                            file = st.file_uploader(f"Adjunto:", type=["png", "jpg", "jpeg"], key=f"file_{nombre}")
                             if file:
                                 archivos_subidos[nombre] = file
                         i += 1
 
-            if st.button("💾 GUARDAR ASISTENCIA Y SOPORTES", type="primary"):
-                df_guardar = df_asistencia_editada.copy()
-                fecha_hoy = datetime.now().strftime("%Y-%m-%d")
-                df_guardar['Fecha'] = fecha_hoy
-                df_guardar['Equipo'] = equipo_asist
+            # BOTÓN DE GUARDADO
+            if st.button("💾 GUARDAR REGISTROS SELECCIONADOS", type="primary"):
+                # Filtramos: Solo guardamos las filas donde se haya elegido un Estado (No guardamos los None)
+                df_a_guardar = df_asistencia_editada.dropna(subset=['Estado'])
                 
-                lista_rutas = []
-                for index, row in df_guardar.iterrows():
-                    nombre = row['Nombre']
-                    ruta = ""
-                    if nombre in archivos_subidos:
-                        ruta = guardar_imagen(archivos_subidos[nombre], nombre, fecha_hoy)
-                    lista_rutas.append(ruta)
-                
-                df_guardar['Soporte'] = lista_rutas
-                
-                cols_finales = ['Fecha', 'Equipo', 'Nombre', 'Cedula', 'Estado', 'Observacion', 'Soporte']
-                guardar_asistencia(df_guardar[cols_finales])
-                st.success("✅ Asistencia guardada correctamente.")
+                if not df_a_guardar.empty:
+                    df_final = df_a_guardar.copy()
+                    df_final['Fecha'] = fecha_hoy
+                    df_final['Equipo'] = equipo_asist
+                    
+                    lista_rutas = []
+                    for index, row in df_final.iterrows():
+                        nombre = row['Nombre']
+                        ruta = ""
+                        if nombre in archivos_subidos:
+                            ruta = guardar_imagen(archivos_subidos[nombre], nombre, fecha_hoy)
+                        lista_rutas.append(ruta)
+                    
+                    df_final['Soporte'] = lista_rutas
+                    
+                    cols_finales = ['Fecha', 'Equipo', 'Nombre', 'Cedula', 'Estado', 'Observacion', 'Soporte']
+                    guardar_asistencia(df_final[cols_finales])
+                    
+                    st.success(f"✅ Se guardaron {len(df_final)} registros. ¡Esas personas desaparecerán de la lista!")
+                    st.rerun() # ESTO ES LO QUE HACE QUE DESAPAREZCAN AL INSTANTE
+                else:
+                    st.warning("⚠️ No has seleccionado ningún estado para guardar.")
+        else:
+            st.success(f"🎉 ¡Todo listo! No hay pendientes en {equipo_asist} para hoy.")
+            st.balloons()
                 
     else:
         st.error("⛔ Sistema Cerrado.")
 
 # ==========================================
-# PESTAÑA 3: VISUALIZAR HISTÓRICO (Solo Lectura)
+# PESTAÑA 3: VISUALIZAR HISTÓRICO (SOLO LECTURA)
 # ==========================================
 with tab_visual:
-    st.header("👁️ Visualización de Registros")
+    st.header("👁️ Visualización de Registros (Solo Lectura)")
     df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
     
     if not df_hist.empty:
@@ -212,16 +243,14 @@ with tab_visual:
         if filtro_fecha:
             df_show = df_show[df_show["Fecha"].isin(filtro_fecha)]
             
-        # Tabla solo lectura (dataframe)
         st.dataframe(df_show, use_container_width=True)
         st.caption(f"Total registros encontrados: {len(df_show)}")
         
-        # Visualizador de Soportes
         st.divider()
         df_con_soporte = df_show[df_show['Soporte'].notna() & (df_show['Soporte'].str.len() > 5)]
         if not df_con_soporte.empty:
             st.subheader("🔍 Visualizador de Soportes")
-            persona_ver = st.selectbox("Selecciona registro para ver soporte:", 
+            persona_ver = st.selectbox("Selecciona registro:", 
                                      df_con_soporte['Nombre'] + " - " + df_con_soporte['Fecha'] + " (" + df_con_soporte['Estado'] + ")", key="viz_soporte")
             if persona_ver:
                 datos_row = df_con_soporte[ (df_con_soporte['Nombre'] + " - " + df_con_soporte['Fecha'] + " (" + df_con_soporte['Estado'] + ")") == persona_ver ].iloc[0]
@@ -229,10 +258,10 @@ with tab_visual:
                 if os.path.exists(ruta_img):
                     st.image(Image.open(ruta_img), caption=f"Soporte de {datos_row['Nombre']}", width=400)
     else:
-        st.info("No hay datos históricos para mostrar.")
+        st.info("No hay datos históricos.")
 
 # ==========================================
-# PESTAÑA 4: ADMINISTRAR (Con Contraseña)
+# PESTAÑA 4: ADMINISTRAR (CLAVE 1234)
 # ==========================================
 with tab_admin:
     st.header("🔐 Administración y Correcciones")
@@ -244,17 +273,15 @@ with tab_admin:
         
         df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
         if not df_hist.empty:
-            st.warning("⚠️ MODO EDICIÓN ACTIVO: Puedes cambiar nombres, cédulas, estados y observaciones directamente en la tabla. Marca 'Borrar' para eliminar la fila.")
+            st.warning("⚠️ MODO EDICIÓN ACTIVO: Puedes cambiar datos o borrar filas.")
             
-            # Preparamos el DF para edición: Agregamos columna checkbox
             df_to_edit = df_hist.copy()
             df_to_edit.insert(0, "Borrar", False) 
             
-            # CONFIGURACIÓN DEL EDITOR TOTAL
             edited_df = st.data_editor(
                 df_to_edit,
                 column_config={
-                    "Borrar": st.column_config.CheckboxColumn("¿Borrar?", help="Marca para eliminar esta fila", default=False),
+                    "Borrar": st.column_config.CheckboxColumn("¿Borrar?", default=False),
                     "Fecha": st.column_config.Column(disabled=True),
                     "Equipo": st.column_config.Column(disabled=True),
                     "Nombre": st.column_config.TextColumn("Nombre", required=True),
@@ -268,19 +295,17 @@ with tab_admin:
                 key="editor_admin_total"
             )
             
-            # BOTÓN DE GUARDADO
             if st.button("💾 GUARDAR CAMBIOS Y BORRADOS", type="primary"):
                 df_final = edited_df[edited_df["Borrar"] == False]
                 sobrescribir_asistencia_completa(df_final)
                 
                 borrados = len(edited_df) - len(df_final)
                 if borrados > 0:
-                    st.success(f"✅ Se eliminaron {borrados} registros y se guardaron los cambios.")
+                    st.success(f"✅ Se eliminaron {borrados} registros. (Volverán a aparecer en la lista de pendientes si eran de hoy).")
                 else:
                     st.success("✅ Cambios guardados.")
                 st.rerun()
 
-            # ZONA DE PELIGRO
             st.divider()
             with st.expander("☢️ ZONA DE PELIGRO (Reset Total)"):
                 st.warning("Esto borra TODO el historial.")
@@ -291,4 +316,4 @@ with tab_admin:
             st.info("No hay datos históricos para administrar.")
             
     elif clave_ingresada:
-        st.error("Clave incorrecta. Acceso denegado.")
+        st.error("Clave incorrecta.")
