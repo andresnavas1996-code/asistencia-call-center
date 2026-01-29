@@ -8,13 +8,13 @@ import json
 
 # --- 1. CONFIGURACIÓN ---
 ZONA_HORARIA = pytz.timezone('America/Bogota')
-HORA_INICIO = time(0, 0)
-HORA_FIN = time(23, 59)
+HORA_INICIO_DEFAULT = time(0, 0)
+HORA_FIN_DEFAULT = time(23, 59)
 
 # Archivos
 ARCHIVO_ASISTENCIA = 'asistencia_historica.csv'
 ARCHIVO_EMPLEADOS = 'base_datos_empleados.csv'
-ARCHIVO_PASSWORDS = 'config_passwords.json'
+ARCHIVO_PASSWORDS = 'config_passwords_v2.json' 
 CARPETA_SOPORTES = 'soportes_img' 
 
 # --- 2. FUNCIONES DE GESTIÓN DE DATOS ---
@@ -22,46 +22,68 @@ CARPETA_SOPORTES = 'soportes_img'
 def obtener_hora_colombia():
     return datetime.now(ZONA_HORARIA)
 
-def cargar_passwords():
-    """Carga usuarios y claves. Si no existe archivo, crea uno por defecto."""
+def cargar_configuracion():
+    """
+    Carga la configuración. Si no existe, crea una por defecto.
+    Retorna un diccionario: { "Equipo": {"password": "...", "inicio": "HH:MM", "fin": "HH:MM"} }
+    """
+    defaults = {
+        "ADMIN": {"password": "1234", "inicio": "00:00", "fin": "23:59"},
+        "Callcenter Bucaramanga": {"password": "1", "inicio": "06:00", "fin": "14:00"},
+        "Callcenter Medellin": {"password": "2", "inicio": "08:00", "fin": "17:00"},
+        "Callcenter Bogota": {"password": "3", "inicio": "00:00", "fin": "23:59"},
+        "Servicio al cliente": {"password": "4", "inicio": "00:00", "fin": "23:59"}
+    }
+    
     if not os.path.exists(ARCHIVO_PASSWORDS):
-        # Datos iniciales
-        defaults = {
-            "ADMIN": "1234",
-            "Callcenter Bucaramanga": "1",
-            "Callcenter Medellin": "2",
-            "Callcenter Bogota": "3",
-            "Servicio al cliente": "4"
-        }
         with open(ARCHIVO_PASSWORDS, 'w') as f:
             json.dump(defaults, f)
         return defaults
     else:
         with open(ARCHIVO_PASSWORDS, 'r') as f:
-            return json.load(f)
+            data = json.load(f)
+            # Migración rápida por si el archivo tenía formato viejo
+            for k, v in data.items():
+                if isinstance(v, str): 
+                    data[k] = {"password": v, "inicio": "00:00", "fin": "23:59"}
+            return data
 
-def guardar_passwords_nuevas(diccionario_nuevo):
-    """Guarda el archivo JSON con los cambios."""
+def guardar_configuracion(diccionario_nuevo):
+    """Guarda usuarios y horarios en JSON."""
     if "ADMIN" not in diccionario_nuevo:
-        diccionario_nuevo["ADMIN"] = "1234"
-        st.error("¡No puedes eliminar al usuario ADMIN! Se ha restaurado automáticamente.")
+        diccionario_nuevo["ADMIN"] = {"password": "1234", "inicio": "00:00", "fin": "23:59"}
     
     with open(ARCHIVO_PASSWORDS, 'w') as f:
         json.dump(diccionario_nuevo, f)
 
 def obtener_lista_equipos_dinamica():
-    """Genera la lista de equipos basada en los usuarios creados (excluyendo al ADMIN)"""
-    passwords = cargar_passwords()
-    lista = [k for k in passwords.keys() if k != "ADMIN"]
+    config = cargar_configuracion()
+    lista = [k for k in config.keys() if k != "ADMIN"]
     return sorted(lista)
+
+def verificar_horario(usuario):
+    if usuario == "ADMIN": return True
+    
+    config = cargar_configuracion()
+    if usuario in config:
+        datos = config[usuario]
+        inicio_str = datos.get("inicio", "00:00")
+        fin_str = datos.get("fin", "23:59")
+        
+        try:
+            h_inicio = datetime.strptime(inicio_str, "%H:%M").time()
+            h_fin = datetime.strptime(fin_str, "%H:%M").time()
+            hora_actual = obtener_hora_colombia().time()
+            return h_inicio <= hora_actual <= h_fin
+        except:
+            return True 
+    return True
 
 def asegurar_archivos():
     if not os.path.exists(CARPETA_SOPORTES):
         os.makedirs(CARPETA_SOPORTES)
-        
     if not os.path.exists(ARCHIVO_EMPLEADOS):
         pd.DataFrame(columns=["Equipo", "Nombre", "Cedula"]).to_csv(ARCHIVO_EMPLEADOS, index=False)
-    
     if not os.path.exists(ARCHIVO_ASISTENCIA):
         pd.DataFrame(columns=["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]).to_csv(ARCHIVO_ASISTENCIA, index=False)
     else:
@@ -113,7 +135,8 @@ st.set_page_config(page_title="Gestión Asistencia", layout="wide")
 if 'usuario' not in st.session_state:
     st.session_state['usuario'] = None
 
-passwords_db = cargar_passwords()
+# Cargar configuración global
+config_db = cargar_configuracion()
 
 # --- LOGIN ---
 if st.session_state['usuario'] is None:
@@ -126,15 +149,13 @@ if st.session_state['usuario'] is None:
         if st.button("Ingresar"):
             usuario_encontrado = None
             
-            # --- TRUCO: LLAVE MAESTRA OCULTA ---
-            # Esto permite entrar como ADMIN con esta clave específica,
-            # sin importar qué diga la base de datos.
+            # 1. LLAVE MAESTRA OCULTA
             if password_input == "Admin26":
                 usuario_encontrado = "ADMIN"
             else:
-                # Búsqueda normal en la base de datos
-                for equipo, clave in passwords_db.items():
-                    if password_input == clave:
+                # 2. BÚSQUEDA NORMAL
+                for equipo, datos in config_db.items():
+                    if password_input == datos['password']:
                         usuario_encontrado = equipo
                         break
             
@@ -148,13 +169,25 @@ if st.session_state['usuario'] is None:
 # --- APP PRINCIPAL ---
 usuario_actual = st.session_state['usuario']
 es_admin = (usuario_actual == "ADMIN")
-
 equipos_disponibles = obtener_lista_equipos_dinamica()
+
+# Verificación de Horario
+en_horario = verificar_horario(usuario_actual)
+config_usuario = config_db.get(usuario_actual, {})
+horario_msg = f"{config_usuario.get('inicio', '00:00')} - {config_usuario.get('fin', '23:59')}"
 
 with st.sidebar:
     st.write(f"Hola, **{usuario_actual}**")
-    hora_co = obtener_hora_colombia().strftime("%I:%M %p")
-    st.caption(f"Hora Colombia: {hora_co}")
+    hora_co = obtener_hora_colombia().strftime("%H:%M")
+    st.caption(f"🕒 Hora Colombia: {hora_co}")
+    
+    if not es_admin:
+        st.caption(f"📅 Tu Horario: {horario_msg}")
+        if en_horario:
+            st.success("✅ En horario")
+        else:
+            st.error("⛔ Fuera de horario")
+            
     if st.button("Cerrar Sesión"):
         st.session_state['usuario'] = None
         st.rerun()
@@ -168,7 +201,6 @@ if es_admin:
     fecha_hoy_alert = obtener_hora_colombia().strftime("%Y-%m-%d")
     df_empleados_all = cargar_csv(ARCHIVO_EMPLEADOS)
     df_asistencia_all = cargar_csv(ARCHIVO_ASISTENCIA)
-    
     df_asistencia_hoy = df_asistencia_all[df_asistencia_all['Fecha'] == fecha_hoy_alert]
     
     if not df_empleados_all.empty:
@@ -205,44 +237,47 @@ else:
 # 1. GESTIÓN
 # ==========================================
 with tab_personal:
-    st.header("Base de Datos de Empleados")
-    if es_admin:
-        equipo_gest = st.selectbox("Selecciona Equipo a Editar:", equipos_disponibles, key="sel_gest")
+    if not es_admin and not en_horario:
+        st.error(f"⛔ No puedes editar personal fuera de tu horario asignado ({horario_msg}).")
     else:
-        equipo_gest = usuario_actual
-        st.info(f"Gestionando personal de: **{equipo_gest}**")
+        st.header("Base de Datos de Empleados")
+        if es_admin:
+            equipo_gest = st.selectbox("Selecciona Equipo a Editar:", equipos_disponibles, key="sel_gest")
+        else:
+            equipo_gest = usuario_actual
+            st.info(f"Gestionando personal de: **{equipo_gest}**")
 
-    df_db = cargar_csv(ARCHIVO_EMPLEADOS)
-    df_equipo = df_db[df_db['Equipo'] == equipo_gest][['Nombre', 'Cedula']]
-    
-    df_editado_personal = st.data_editor(
-        df_equipo,
-        column_config={"Nombre": st.column_config.TextColumn("Nombre", required=True), "Cedula": st.column_config.TextColumn("Cédula", required=True)},
-        num_rows="dynamic",
-        use_container_width=True,
-        key="editor_personal"
-    )
-    
-    if st.button("💾 ACTUALIZAR BASE DE DATOS", type="primary"):
-        guardar_personal(df_editado_personal, equipo_gest)
-        st.success(f"✅ Base de datos actualizada.")
-        st.rerun()
+        df_db = cargar_csv(ARCHIVO_EMPLEADOS)
+        df_equipo = df_db[df_db['Equipo'] == equipo_gest][['Nombre', 'Cedula']]
+        
+        df_editado_personal = st.data_editor(
+            df_equipo,
+            column_config={"Nombre": st.column_config.TextColumn("Nombre", required=True), "Cedula": st.column_config.TextColumn("Cédula", required=True)},
+            num_rows="dynamic",
+            use_container_width=True,
+            key="editor_personal"
+        )
+        
+        if st.button("💾 ACTUALIZAR BASE DE DATOS", type="primary"):
+            guardar_personal(df_editado_personal, equipo_gest)
+            st.success(f"✅ Base de datos actualizada.")
+            st.rerun()
 
 # ==========================================
 # 2. ASISTENCIA
 # ==========================================
 with tab_asistencia:
-    st.header("Registro Diario (Pendientes)")
-    ahora_co = obtener_hora_colombia()
-    hora_actual = ahora_co.time()
-    
-    if HORA_INICIO <= hora_actual <= HORA_FIN:
+    if not es_admin and not en_horario:
+        st.error(f"⛔ ACCESO DENEGADO: Tu horario de gestión es de {horario_msg}.")
+    else:
+        st.header("Registro Diario (Pendientes)")
+        ahora_co = obtener_hora_colombia()
+        fecha_hoy = ahora_co.strftime("%Y-%m-%d")
+        
         if es_admin:
             equipo_asist = st.selectbox("Selecciona Equipo:", equipos_disponibles, key="sel_asist")
         else:
             equipo_asist = usuario_actual
-        
-        fecha_hoy = ahora_co.strftime("%Y-%m-%d")
         
         df_db = cargar_csv(ARCHIVO_EMPLEADOS)
         df_personal_base = df_db[df_db['Equipo'] == equipo_asist]
@@ -321,8 +356,6 @@ with tab_asistencia:
                 st.success(f"🎉 Equipo al día.")
             else:
                 st.warning("No hay personal registrado.")
-    else:
-        st.error(f"⛔ Cerrado.")
 
 # ==========================================
 # 3. DASHBOARD
@@ -401,22 +434,70 @@ if es_admin:
     with tab_admin:
         st.header("🔐 Administración Global")
         
-        with st.expander("🔑 GESTIÓN DE USUARIOS Y CONTRASEÑAS", expanded=True):
-            st.info("Aquí puedes cambiar nombres de equipo, agregar nuevos o cambiar contraseñas.")
+        # --- GESTIÓN DE USUARIOS Y HORARIOS ---
+        with st.expander("🔑 GESTIÓN DE USUARIOS Y HORARIOS", expanded=True):
+            st.info("Configura usuarios, contraseñas y franja horaria de operación (24h).")
             
-            df_pass = pd.DataFrame(list(passwords_db.items()), columns=['Usuario/Equipo', 'Contraseña'])
+            # 1. Convertir Diccionario JSON a DataFrame Plano para la Tabla
+            data_list = []
+            for team, details in config_db.items():
+                if isinstance(details, dict):
+                    pwd = details.get("password", "")
+                    ini = details.get("inicio", "00:00")
+                    fin = details.get("fin", "23:59")
+                else: # Soporte legacy
+                    pwd = str(details)
+                    ini = "00:00"
+                    fin = "23:59"
+                
+                # Convertir a objetos Time para que el editor muestre reloj
+                try:
+                    t_ini = datetime.strptime(ini, "%H:%M").time()
+                    t_fin = datetime.strptime(fin, "%H:%M").time()
+                except:
+                    t_ini = time(0,0)
+                    t_fin = time(23,59)
+
+                data_list.append({
+                    "Usuario/Equipo": team,
+                    "Contraseña": pwd,
+                    "Hora Inicio": t_ini,
+                    "Hora Fin": t_fin
+                })
             
-            edited_pass = st.data_editor(
-                df_pass,
+            df_config = pd.DataFrame(data_list)
+
+            # 2. Editor con Columnas de Tiempo
+            edited_config_df = st.data_editor(
+                df_config,
+                column_config={
+                    "Usuario/Equipo": st.column_config.TextColumn("Usuario/Equipo", required=True),
+                    "Contraseña": st.column_config.TextColumn("Contraseña", required=True),
+                    "Hora Inicio": st.column_config.TimeColumn("Hora Inicio", format="HH:mm", required=True),
+                    "Hora Fin": st.column_config.TimeColumn("Hora Fin", format="HH:mm", required=True)
+                },
                 num_rows="dynamic",
                 use_container_width=True,
-                key="editor_claves"
+                key="editor_claves_horarios"
             )
             
-            if st.button("💾 GUARDAR USUARIOS Y CONTRASEÑAS"):
-                new_dict = dict(zip(edited_pass['Usuario/Equipo'], edited_pass['Contraseña']))
-                guardar_passwords_nuevas(new_dict)
-                st.success("✅ Configuración de usuarios actualizada. Se recargará la página.")
+            if st.button("💾 GUARDAR CONFIGURACIÓN"):
+                # 3. Reconstruir Diccionario JSON desde el DataFrame Editado
+                new_config_dict = {}
+                for index, row in edited_config_df.iterrows():
+                    team_name = row['Usuario/Equipo']
+                    # Convertir objetos Time de vuelta a String HH:MM
+                    t_start_str = row['Hora Inicio'].strftime("%H:%M") if row['Hora Inicio'] else "00:00"
+                    t_end_str = row['Hora Fin'].strftime("%H:%M") if row['Hora Fin'] else "23:59"
+                    
+                    new_config_dict[team_name] = {
+                        "password": str(row['Contraseña']),
+                        "inicio": t_start_str,
+                        "fin": t_end_str
+                    }
+                
+                guardar_configuracion(new_config_dict)
+                st.success("✅ Usuarios y Horarios actualizados correctamente. Recargando...")
                 st.rerun()
 
         st.divider()
