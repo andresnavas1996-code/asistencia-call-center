@@ -139,7 +139,7 @@ st.title(f"📋 Asistencia: {usuario_actual if not es_admin else 'Vista Global'}
 
 asegurar_archivos()
 
-# ALERTA DE PENDIENTES (SOLO PARA ADMIN Y VISIBLE ARRIBA)
+# --- ALERTA INTELIGENTE PARA ADMIN ---
 if es_admin:
     fecha_hoy_alert = obtener_hora_colombia().strftime("%Y-%m-%d")
     df_empleados_all = cargar_csv(ARCHIVO_EMPLEADOS)
@@ -148,8 +148,8 @@ if es_admin:
     # Filtramos asistencia de hoy
     df_asistencia_hoy = df_asistencia_all[df_asistencia_all['Fecha'] == fecha_hoy_alert]
     
-    # Creamos claves únicas (Equipo + Nombre) para comparar
     if not df_empleados_all.empty:
+        # Creamos claves únicas para comparar
         df_empleados_all['Clave'] = df_empleados_all['Equipo'] + df_empleados_all['Nombre']
         
         registrados_hoy = []
@@ -157,16 +157,37 @@ if es_admin:
             df_asistencia_hoy['Clave'] = df_asistencia_hoy['Equipo'] + df_asistencia_hoy['Nombre']
             registrados_hoy = df_asistencia_hoy['Clave'].tolist()
         
-        # Buscamos quienes NO están en la lista de hoy
+        # Encontramos los faltantes
         df_faltantes = df_empleados_all[~df_empleados_all['Clave'].isin(registrados_hoy)].copy()
         
         if not df_faltantes.empty:
-            st.error(f"⚠️ ALERTA: Faltan {len(df_faltantes)} personas por reportar asistencia hoy ({fecha_hoy_alert}).")
-            with st.expander("Ver lista de pendientes por gestionar"):
-                st.dataframe(df_faltantes[['Equipo', 'Nombre', 'Cedula']], use_container_width=True)
+            total_pendientes = len(df_faltantes)
+            st.error(f"⚠️ ALERTA DE GESTIÓN: Faltan {total_pendientes} personas por reportar asistencia hoy ({fecha_hoy_alert}).")
+            
+            # --- NUEVO: RESUMEN POR EQUIPOS ---
+            st.subheader("📢 Equipos con Pendientes:")
+            
+            # Calculamos cuántos faltan por equipo
+            resumen_equipos = df_faltantes['Equipo'].value_counts().reset_index()
+            resumen_equipos.columns = ['Equipo', 'Cantidad Pendiente']
+            
+            # Mostramos 2 columnas: Resumen a la izquierda, Detalle oculto a la derecha
+            c1, c2 = st.columns([1, 2])
+            
+            with c1:
+                # Tabla bonita con el resumen
+                st.dataframe(resumen_equipos, hide_index=True, use_container_width=True)
+            
+            with c2:
+                with st.expander("🔍 Ver lista detallada de nombres"):
+                    st.dataframe(df_faltantes[['Equipo', 'Nombre', 'Cedula']], hide_index=True, use_container_width=True)
+            
+            st.divider() # Línea separadora
+            
         else:
             st.success(f"✅ ¡Excelente! Todo el personal (Total: {len(df_empleados_all)}) ha sido gestionado hoy.")
 
+# --- PESTAÑAS PRINCIPALES ---
 if es_admin:
     tab_personal, tab_asistencia, tab_visual, tab_admin = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "📊 DASHBOARD GLOBAL", "🔐 ADMINISTRAR BD"])
 else:
