@@ -4,51 +4,68 @@ from datetime import datetime, time
 import os
 from PIL import Image
 import pytz 
+import json # Nueva librería para manejar las contraseñas
 
-# --- 1. CONFIGURACIÓN Y CLAVES ---
+# --- 1. CONFIGURACIÓN ---
 ZONA_HORARIA = pytz.timezone('America/Bogota')
-
 HORA_INICIO = time(0, 0)
 HORA_FIN = time(23, 59)
+
+# Archivos de datos
 ARCHIVO_ASISTENCIA = 'asistencia_historica.csv'
 ARCHIVO_EMPLEADOS = 'base_datos_empleados.csv'
+ARCHIVO_PASSWORDS = 'config_passwords.json' # Nuevo archivo para guardar claves
 CARPETA_SOPORTES = 'soportes_img' 
 
-# LISTA DE EQUIPOS
+# LISTA MAESTRA DE EQUIPOS (Estos nombres no deben cambiar)
 EQUIPOS_LISTA = [
-    "Callcenter Bucaramanga",      # Clave: 1
-    "Callcenter Medellin",         # Clave: 2
-    "Callcenter Bogota",           # Clave: 3
-    "Servicio al cliente",         # Clave: 4
-    "CallcenterMayoreo Medellin",  # Clave: 5
-    "Campo 6",                     # Clave: 6
-    "Campo 7",                     # Clave: 7
-    "Campo 8",                     # Clave: 8
-    "Campo 9",                     # Clave: 9
-    "Campo 10",                    # Clave: 10
-    "Campo 11"                     # Clave: 11
+    "Callcenter Bucaramanga",
+    "Callcenter Medellin",
+    "Callcenter Bogota",
+    "Servicio al cliente",
+    "CallcenterMayoreo Medellin",
+    "Campo 6",
+    "Campo 7",
+    "Campo 8",
+    "Campo 9",
+    "Campo 10",
+    "Campo 11"
 ]
-
-# MAPEO DE CLAVES
-USUARIOS = {
-    "1": "Callcenter Bucaramanga",
-    "2": "Callcenter Medellin",
-    "3": "Callcenter Bogota",
-    "4": "Servicio al cliente",
-    "5": "CallcenterMayoreo Medellin",
-    "6": "Campo 6",
-    "7": "Campo 7",
-    "8": "Campo 8",
-    "9": "Campo 9",
-    "10": "Campo 10",
-    "11": "Campo 11",
-    "1234": "ADMIN" 
-}
 
 # --- 2. FUNCIONES ---
 
 def obtener_hora_colombia():
     return datetime.now(ZONA_HORARIA)
+
+def cargar_passwords():
+    """Carga las contraseñas desde el archivo JSON. Si no existe, crea las por defecto."""
+    if not os.path.exists(ARCHIVO_PASSWORDS):
+        # Claves por defecto iniciales
+        defaults = {
+            "ADMIN": "1234",
+            "Callcenter Bucaramanga": "1",
+            "Callcenter Medellin": "2",
+            "Callcenter Bogota": "3",
+            "Servicio al cliente": "4",
+            "CallcenterMayoreo Medellin": "5",
+            "Campo 6": "6",
+            "Campo 7": "7",
+            "Campo 8": "8",
+            "Campo 9": "9",
+            "Campo 10": "10",
+            "Campo 11": "11"
+        }
+        with open(ARCHIVO_PASSWORDS, 'w') as f:
+            json.dump(defaults, f)
+        return defaults
+    else:
+        with open(ARCHIVO_PASSWORDS, 'r') as f:
+            return json.load(f)
+
+def guardar_passwords_nuevas(diccionario_nuevo):
+    """Guarda los cambios de contraseña en el archivo."""
+    with open(ARCHIVO_PASSWORDS, 'w') as f:
+        json.dump(diccionario_nuevo, f)
 
 def asegurar_archivos():
     if not os.path.exists(CARPETA_SOPORTES):
@@ -102,28 +119,39 @@ def guardar_imagen(uploaded_file, nombre_persona, fecha):
 def borrar_historial_completo():
     pd.DataFrame(columns=["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]).to_csv(ARCHIVO_ASISTENCIA, index=False)
 
-# --- 3. INTERFAZ ---
+# --- 3. INICIO DE LA APP ---
 st.set_page_config(page_title="Gestión Asistencia", layout="wide")
 
 if 'usuario' not in st.session_state:
     st.session_state['usuario'] = None
 
-# LOGIN
+# Cargar base de contraseñas actual
+passwords_db = cargar_passwords()
+
+# --- PANTALLA DE LOGIN ---
 if st.session_state['usuario'] is None:
     st.title("🔐 Ingreso al Sistema")
-    st.markdown("Por favor ingrese la clave asignada a su equipo.")
+    st.markdown("Por favor ingrese la clave asignada.")
+    
     col1, col2 = st.columns([1, 2])
     with col1:
-        password = st.text_input("Contraseña:", type="password")
+        password_input = st.text_input("Contraseña:", type="password")
         if st.button("Ingresar"):
-            if password in USUARIOS:
-                st.session_state['usuario'] = USUARIOS[password]
+            # Lógica de búsqueda inversa: Buscamos qué equipo tiene esa clave
+            usuario_encontrado = None
+            for equipo, clave in passwords_db.items():
+                if password_input == clave:
+                    usuario_encontrado = equipo
+                    break
+            
+            if usuario_encontrado:
+                st.session_state['usuario'] = usuario_encontrado
                 st.rerun()
             else:
                 st.error("Contraseña incorrecta.")
     st.stop() 
 
-# APP PRINCIPAL
+# --- APLICACIÓN PRINCIPAL ---
 usuario_actual = st.session_state['usuario']
 es_admin = (usuario_actual == "ADMIN")
 
@@ -139,61 +167,45 @@ st.title(f"📋 Asistencia: {usuario_actual if not es_admin else 'Vista Global'}
 
 asegurar_archivos()
 
-# --- ALERTA INTELIGENTE PARA ADMIN ---
+# --- ALERTA DE PENDIENTES (SOLO ADMIN) ---
 if es_admin:
     fecha_hoy_alert = obtener_hora_colombia().strftime("%Y-%m-%d")
     df_empleados_all = cargar_csv(ARCHIVO_EMPLEADOS)
     df_asistencia_all = cargar_csv(ARCHIVO_ASISTENCIA)
     
-    # Filtramos asistencia de hoy
     df_asistencia_hoy = df_asistencia_all[df_asistencia_all['Fecha'] == fecha_hoy_alert]
     
     if not df_empleados_all.empty:
-        # Creamos claves únicas para comparar
         df_empleados_all['Clave'] = df_empleados_all['Equipo'] + df_empleados_all['Nombre']
-        
         registrados_hoy = []
         if not df_asistencia_hoy.empty:
             df_asistencia_hoy['Clave'] = df_asistencia_hoy['Equipo'] + df_asistencia_hoy['Nombre']
             registrados_hoy = df_asistencia_hoy['Clave'].tolist()
         
-        # Encontramos los faltantes
         df_faltantes = df_empleados_all[~df_empleados_all['Clave'].isin(registrados_hoy)].copy()
         
         if not df_faltantes.empty:
-            total_pendientes = len(df_faltantes)
-            st.error(f"⚠️ ALERTA DE GESTIÓN: Faltan {total_pendientes} personas por reportar asistencia hoy ({fecha_hoy_alert}).")
-            
+            st.error(f"⚠️ ALERTA: Faltan {len(df_faltantes)} personas por reportar hoy.")
             st.subheader("📢 Equipos con Pendientes:")
-            
-            # Calculamos cuántos faltan por equipo
             resumen_equipos = df_faltantes['Equipo'].value_counts().reset_index()
-            # CAMBIO AQUÍ: Nombre de columna corto
             resumen_equipos.columns = ['Equipo', 'Pendientes'] 
             
             c1, c2 = st.columns([1, 2])
-            
             with c1:
-                # Tabla compacta
                 st.dataframe(resumen_equipos, hide_index=True, use_container_width=True)
-            
             with c2:
-                with st.expander("🔍 Ver lista detallada de nombres"):
-                    st.dataframe(df_faltantes[['Equipo', 'Nombre', 'Cedula']], hide_index=True, use_container_width=True)
-            
-            st.divider() 
-            
-        else:
-            st.success(f"✅ ¡Excelente! Todo el personal (Total: {len(df_empleados_all)}) ha sido gestionado hoy.")
+                with st.expander("🔍 Ver detalle"):
+                    st.dataframe(df_faltantes[['Equipo', 'Nombre']], hide_index=True, use_container_width=True)
+            st.divider()
 
-# --- PESTAÑAS PRINCIPALES ---
+# --- PESTAÑAS ---
 if es_admin:
-    tab_personal, tab_asistencia, tab_visual, tab_admin = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "📊 DASHBOARD GLOBAL", "🔐 ADMINISTRAR BD"])
+    tab_personal, tab_asistencia, tab_visual, tab_admin = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "📊 DASHBOARD GLOBAL", "🔐 ADMINISTRAR"])
 else:
     tab_personal, tab_asistencia, tab_visual = st.tabs(["👥 MI EQUIPO", "⚡ TOMAR ASISTENCIA", "📊 MI DASHBOARD"])
 
 # ==========================================
-# PESTAÑA 1: GESTIÓN
+# 1. GESTIÓN
 # ==========================================
 with tab_personal:
     st.header("Base de Datos de Empleados")
@@ -220,7 +232,7 @@ with tab_personal:
         st.rerun()
 
 # ==========================================
-# PESTAÑA 2: ASISTENCIA
+# 2. ASISTENCIA
 # ==========================================
 with tab_asistencia:
     st.header("Registro Diario (Pendientes)")
@@ -254,7 +266,7 @@ with tab_asistencia:
             df_input['Observacion'] = ""
             df_input['Soporte'] = None
             
-            st.info(f"📅 Fecha: {fecha_hoy} | ⏳ Pendientes en {equipo_asist}: {len(df_input)}")
+            st.info(f"📅 Fecha: {fecha_hoy} | ⏳ Pendientes: {len(df_input)}")
             
             df_asistencia_editada = st.data_editor(
                 df_input,
@@ -293,7 +305,6 @@ with tab_asistencia:
                     df_final = df_a_guardar.copy()
                     df_final['Fecha'] = fecha_hoy 
                     df_final['Equipo'] = equipo_asist
-                    
                     lista_rutas = []
                     for index, row in df_final.iterrows():
                         nombre = row['Nombre']
@@ -301,27 +312,26 @@ with tab_asistencia:
                         if nombre in archivos_subidos:
                             ruta = guardar_imagen(archivos_subidos[nombre], nombre, fecha_hoy)
                         lista_rutas.append(ruta)
-                    
                     df_final['Soporte'] = lista_rutas
                     cols_finales = ['Fecha', 'Equipo', 'Nombre', 'Cedula', 'Estado', 'Observacion', 'Soporte']
                     guardar_asistencia(df_final[cols_finales])
                     st.success(f"✅ {len(df_final)} registros guardados.")
                     st.rerun()
                 else:
-                    st.warning("Selecciona un estado para guardar.")
+                    st.warning("Selecciona un estado.")
         else:
             if not df_personal_base.empty:
-                st.success(f"🎉 Equipo {equipo_asist} al día.")
+                st.success(f"🎉 Equipo al día.")
             else:
-                st.warning("Este equipo aún no tiene personal.")
+                st.warning("No hay personal registrado.")
     else:
-        st.error(f"⛔ Sistema Cerrado. (Hora Colombia: {hora_actual.strftime('%H:%M')})")
+        st.error(f"⛔ Sistema Cerrado. (Hora: {hora_actual.strftime('%H:%M')})")
 
 # ==========================================
-# PESTAÑA 3: DASHBOARD
+# 3. DASHBOARD
 # ==========================================
 with tab_visual:
-    st.header("📊 Dashboard de Resultados")
+    st.header("📊 Dashboard")
     df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
     
     if not df_hist.empty:
@@ -357,35 +367,27 @@ with tab_visual:
 
         st.subheader("Indicadores")
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-        kpi1.metric("Total Gestionados", total_regs)
+        kpi1.metric("Total", total_regs)
         kpi2.metric("% Asistencia", f"{porc_asistencia:.1f}%")
         kpi3.metric("Llegadas Tarde", tardanzas, delta_color="inverse")
-        kpi4.metric("Incapacidades/Ausencias", incapacidades + ausencias, delta_color="inverse")
+        kpi4.metric("Incap/Ausencia", incapacidades + ausencias, delta_color="inverse")
         
         st.divider()
-
         col_graf1, col_graf2 = st.columns(2)
         with col_graf1:
-            st.subheader("Estados")
             if not df_show.empty:
                 st.bar_chart(df_show['Estado'].value_counts(), color="#4CAF50")
         with col_graf2:
-            if es_admin:
-                st.subheader("Comparativa por Equipos")
-                if not df_show.empty:
-                    st.bar_chart(df_show['Equipo'].value_counts(), color="#2196F3")
-            else:
-                st.info("Vista de equipo único.")
+            if es_admin and not df_show.empty:
+                st.bar_chart(df_show['Equipo'].value_counts(), color="#2196F3")
 
         st.divider()
-        st.subheader("📋 Detalle")
         st.dataframe(df_show, use_container_width=True)
         
         st.subheader("🔍 Soportes")
         df_con_soporte = df_show[df_show['Soporte'].notna() & (df_show['Soporte'].str.len() > 5)]
-        
         if not df_con_soporte.empty:
-            persona_ver = st.selectbox("Ver soporte de:", 
+            persona_ver = st.selectbox("Ver soporte:", 
                                      df_con_soporte['Nombre'] + " - " + df_con_soporte['Fecha'] + " (" + df_con_soporte['Estado'] + ")", key="viz_soporte")
             if persona_ver:
                 datos_row = df_con_soporte[ (df_con_soporte['Nombre'] + " - " + df_con_soporte['Fecha'] + " (" + df_con_soporte['Estado'] + ")") == persona_ver ].iloc[0]
@@ -393,14 +395,40 @@ with tab_visual:
                 if os.path.exists(ruta_img):
                     st.image(Image.open(ruta_img), caption=f"Soporte", width=400)
     else:
-        st.info("No hay datos históricos.")
+        st.info("No hay datos.")
 
 # ==========================================
-# PESTAÑA 4: ADMIN
+# 4. ADMINISTRAR (SOLO ADMIN)
 # ==========================================
 if es_admin:
     with tab_admin:
         st.header("🔐 Administración Global")
+        
+        # --- SECCIÓN 1: GESTIÓN DE CLAVES ---
+        with st.expander("🔑 GESTIÓN DE CONTRASEÑAS", expanded=True):
+            st.info("Edita las contraseñas de los equipos aquí. (Recuerda: ADMIN es tu clave).")
+            
+            # Convertimos el diccionario de claves a DataFrame para editarlo
+            df_pass = pd.DataFrame(list(passwords_db.items()), columns=['Usuario/Equipo', 'Contraseña'])
+            
+            edited_pass = st.data_editor(
+                df_pass,
+                disabled=["Usuario/Equipo"], # No dejar cambiar el nombre del equipo, solo la clave
+                hide_index=True,
+                use_container_width=True,
+                key="editor_claves"
+            )
+            
+            if st.button("💾 GUARDAR NUEVAS CONTRASEÑAS"):
+                # Convertimos la tabla de nuevo a diccionario
+                new_dict = dict(zip(edited_pass['Usuario/Equipo'], edited_pass['Contraseña']))
+                guardar_passwords_nuevas(new_dict)
+                st.success("✅ Contraseñas actualizadas correctamente. (Tome efecto al recargar).")
+
+        st.divider()
+
+        # --- SECCIÓN 2: CORRECCIONES DE ASISTENCIA ---
+        st.subheader("🛠️ Corregir/Borrar Registros")
         df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
         if not df_hist.empty:
             df_to_edit = df_hist.copy()
@@ -427,7 +455,7 @@ if es_admin:
                 st.success("Cambios aplicados.")
                 st.rerun()
 
-            with st.expander("☢️ BORRAR TODO"):
+            with st.expander("☢️ BORRAR TODO EL HISTORIAL"):
                 if st.button("🔴 CONFIRMAR BORRADO TOTAL", type="primary"):
                     borrar_historial_completo()
                     st.rerun()
