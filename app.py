@@ -164,25 +164,24 @@ if es_admin:
             total_pendientes = len(df_faltantes)
             st.error(f"⚠️ ALERTA DE GESTIÓN: Faltan {total_pendientes} personas por reportar asistencia hoy ({fecha_hoy_alert}).")
             
-            # --- NUEVO: RESUMEN POR EQUIPOS ---
             st.subheader("📢 Equipos con Pendientes:")
             
             # Calculamos cuántos faltan por equipo
             resumen_equipos = df_faltantes['Equipo'].value_counts().reset_index()
-            resumen_equipos.columns = ['Equipo', 'Cantidad Pendiente']
+            # CAMBIO AQUÍ: Nombre de columna corto
+            resumen_equipos.columns = ['Equipo', 'Pendientes'] 
             
-            # Mostramos 2 columnas: Resumen a la izquierda, Detalle oculto a la derecha
             c1, c2 = st.columns([1, 2])
             
             with c1:
-                # Tabla bonita con el resumen
+                # Tabla compacta
                 st.dataframe(resumen_equipos, hide_index=True, use_container_width=True)
             
             with c2:
                 with st.expander("🔍 Ver lista detallada de nombres"):
                     st.dataframe(df_faltantes[['Equipo', 'Nombre', 'Cedula']], hide_index=True, use_container_width=True)
             
-            st.divider() # Línea separadora
+            st.divider() 
             
         else:
             st.success(f"✅ ¡Excelente! Todo el personal (Total: {len(df_empleados_all)}) ha sido gestionado hoy.")
