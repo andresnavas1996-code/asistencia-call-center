@@ -3,8 +3,12 @@ import pandas as pd
 from datetime import datetime, time
 import os
 from PIL import Image
+import pytz # Librería para manejar la zona horaria
 
 # --- 1. CONFIGURACIÓN Y CLAVES ---
+# Configuración de Zona Horaria Colombia
+ZONA_HORARIA = pytz.timezone('America/Bogota')
+
 HORA_INICIO = time(0, 0)
 HORA_FIN = time(23, 59)
 ARCHIVO_ASISTENCIA = 'asistencia_historica.csv'
@@ -13,7 +17,7 @@ CARPETA_SOPORTES = 'soportes_img'
 
 # LISTA DE EQUIPOS
 EQUIPOS_LISTA = [
-    "Callcenter Bucaramanga",      # Clave: 1111
+    "Callcenter Bucaramanga",      # Clave: 1
     "Callcenter Medellin",         # Clave: 2
     "Callcenter Bogota",           # Clave: 3
     "Servicio al cliente",         # Clave: 4
@@ -26,10 +30,9 @@ EQUIPOS_LISTA = [
     "Campo 11"                     # Clave: 11
 ]
 
-# MAPEO DE CLAVES (Aquí puedes cambiarlas después)
-# Formato: "CONTRASEÑA" : "NOMBRE EXACTO DEL EQUIPO"
+# MAPEO DE CLAVES
 USUARIOS = {
-    "1111": "Callcenter Bucaramanga",
+    "1": "Callcenter Bucaramanga",
     "2": "Callcenter Medellin",
     "3": "Callcenter Bogota",
     "4": "Servicio al cliente",
@@ -40,21 +43,20 @@ USUARIOS = {
     "9": "Campo 9",
     "10": "Campo 10",
     "11": "Campo 11",
-    "1234": "ADMIN" # Clave maestra
+    "1234": "ADMIN" 
 }
 
 # --- 2. FUNCIONES ---
+
+def obtener_hora_colombia():
+    """Devuelve la fecha y hora actual exacta en Colombia"""
+    return datetime.now(ZONA_HORARIA)
 
 def asegurar_archivos():
     if not os.path.exists(CARPETA_SOPORTES):
         os.makedirs(CARPETA_SOPORTES)
         
     if not os.path.exists(ARCHIVO_EMPLEADOS):
-        datos_lista = []
-        for equipo in EQUIPOS_LISTA:
-            # Creamos datos semilla vacíos o con nombres genéricos si se desea
-            pass 
-        # Creamos el archivo vacío con cabeceras si no existe
         pd.DataFrame(columns=["Equipo", "Nombre", "Cedula"]).to_csv(ARCHIVO_EMPLEADOS, index=False)
     
     if not os.path.exists(ARCHIVO_ASISTENCIA):
@@ -123,16 +125,19 @@ if st.session_state['usuario'] is None:
                 st.rerun()
             else:
                 st.error("Contraseña incorrecta.")
-    st.stop() # Detiene la ejecución aquí si no está logueado
+    st.stop() 
 
-# --- APLICACIÓN PRINCIPAL (SOLO SI ESTÁ LOGUEADO) ---
+# --- APLICACIÓN PRINCIPAL ---
 
 usuario_actual = st.session_state['usuario']
 es_admin = (usuario_actual == "ADMIN")
 
-# Barra lateral con Info y Logout
 with st.sidebar:
     st.write(f"Hola, **{usuario_actual}**")
+    # Mostrar la hora actual de Colombia para verificar
+    hora_co = obtener_hora_colombia().strftime("%I:%M %p")
+    st.caption(f"Hora Colombia: {hora_co}")
+    
     if st.button("Cerrar Sesión"):
         st.session_state['usuario'] = None
         st.rerun()
@@ -141,24 +146,20 @@ st.title(f"📋 Asistencia: {usuario_actual if not es_admin else 'Vista Global'}
 
 asegurar_archivos()
 
-# Definir pestañas según el rol
 if es_admin:
     tab_personal, tab_asistencia, tab_visual, tab_admin = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "📊 DASHBOARD GLOBAL", "🔐 ADMINISTRAR BD"])
 else:
-    # Los usuarios normales ven menos pestañas y sin la de Admin
     tab_personal, tab_asistencia, tab_visual = st.tabs(["👥 MI EQUIPO", "⚡ TOMAR ASISTENCIA", "📊 MI DASHBOARD"])
 
 # ==========================================
-# PESTAÑA 1: GESTIÓN PERSONAL (DB)
+# PESTAÑA 1: GESTIÓN PERSONAL
 # ==========================================
 with tab_personal:
     st.header("Base de Datos de Empleados")
     
-    # LOGICA DE SEGURIDAD DE EQUIPO
     if es_admin:
         equipo_gest = st.selectbox("Selecciona Equipo a Editar:", EQUIPOS_LISTA, key="sel_gest")
     else:
-        # Si no es admin, el equipo está fijo y bloqueado
         equipo_gest = usuario_actual
         st.info(f"Gestionando personal de: **{equipo_gest}**")
 
@@ -183,20 +184,20 @@ with tab_personal:
 # ==========================================
 with tab_asistencia:
     st.header("Registro Diario (Pendientes)")
-    ahora = datetime.now().time()
     
-    if HORA_INICIO <= ahora <= HORA_FIN:
-        
-        # LOGICA DE SEGURIDAD DE EQUIPO
+    # Usamos la hora colombiana
+    ahora_co = obtener_hora_colombia()
+    hora_actual = ahora_co.time()
+    
+    if HORA_INICIO <= hora_actual <= HORA_FIN:
         if es_admin:
             equipo_asist = st.selectbox("Selecciona Equipo:", EQUIPOS_LISTA, key="sel_asist")
         else:
             equipo_asist = usuario_actual
-            # No mostramos selectbox, solo el título
         
-        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+        # Fecha exacta en Colombia
+        fecha_hoy = ahora_co.strftime("%Y-%m-%d")
         
-        # Lógica de Cola
         df_db = cargar_csv(ARCHIVO_EMPLEADOS)
         df_personal_base = df_db[df_db['Equipo'] == equipo_asist]
         
@@ -253,7 +254,7 @@ with tab_asistencia:
                 df_a_guardar = df_asistencia_editada.dropna(subset=['Estado'])
                 if not df_a_guardar.empty:
                     df_final = df_a_guardar.copy()
-                    df_final['Fecha'] = fecha_hoy
+                    df_final['Fecha'] = fecha_hoy # Usa la fecha corregida
                     df_final['Equipo'] = equipo_asist
                     
                     lista_rutas = []
@@ -267,41 +268,38 @@ with tab_asistencia:
                     df_final['Soporte'] = lista_rutas
                     cols_finales = ['Fecha', 'Equipo', 'Nombre', 'Cedula', 'Estado', 'Observacion', 'Soporte']
                     guardar_asistencia(df_final[cols_finales])
-                    st.success(f"✅ {len(df_final)} registros guardados.")
+                    st.success(f"✅ {len(df_final)} registros guardados con fecha {fecha_hoy}.")
                     st.rerun()
                 else:
                     st.warning("Selecciona un estado para guardar.")
         else:
             if not df_personal_base.empty:
-                st.success(f"🎉 Todo el equipo {equipo_asist} ha sido gestionado hoy.")
+                st.success(f"🎉 Todo el equipo {equipo_asist} ha sido gestionado hoy ({fecha_hoy}).")
                 st.balloons()
             else:
-                st.warning("Este equipo aún no tiene personal en la Base de Datos. Ve a la primera pestaña para agregar gente.")
+                st.warning("Este equipo aún no tiene personal.")
     else:
-        st.error("⛔ Sistema Cerrado.")
+        st.error(f"⛔ Sistema Cerrado. (Hora Colombia: {hora_actual.strftime('%H:%M')})")
 
 # ==========================================
-# PESTAÑA 3: DASHBOARD (FILTRADO POR SEGURIDAD)
+# PESTAÑA 3: DASHBOARD
 # ==========================================
 with tab_visual:
     st.header("📊 Dashboard de Resultados")
     df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
     
     if not df_hist.empty:
-        # LOGICA DE SEGURIDAD
         if not es_admin:
-            # Si es usuario normal, forzamos el filtro a SU equipo
             df_hist = df_hist[df_hist['Equipo'] == usuario_actual]
             
         with st.container(border=True):
             col1, col2 = st.columns(2)
             with col1:
-                # Si es Admin, ve el selector. Si es usuario, ve un texto fijo.
                 if es_admin:
                     filtro_equipo = st.multiselect("Filtrar Equipo:", df_hist["Equipo"].unique(), key="viz_equipo")
                 else:
                     st.markdown(f"**Equipo:** {usuario_actual}")
-                    filtro_equipo = [usuario_actual] # Preselección forzada invisible
+                    filtro_equipo = [usuario_actual]
                     
             with col2:
                 filtro_fecha = st.multiselect("Filtrar Fecha:", df_hist["Fecha"].unique(), key="viz_fecha")
@@ -366,12 +364,12 @@ with tab_visual:
         st.info("No hay datos históricos.")
 
 # ==========================================
-# PESTAÑA 4: ADMIN (SOLO VISIBLE PARA ADMIN)
+# PESTAÑA 4: ADMIN
 # ==========================================
 if es_admin:
     with tab_admin:
         st.header("🔐 Administración Global")
-        st.info("Como Administrador (1234), tienes permisos totales para corregir errores.")
+        st.info("Como Administrador (1234), tienes permisos totales.")
         
         df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
         if not df_hist.empty:
