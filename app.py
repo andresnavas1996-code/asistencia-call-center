@@ -3,10 +3,9 @@ import pandas as pd
 from datetime import datetime, time
 import os
 from PIL import Image
-import pytz # Librería para manejar la zona horaria
+import pytz 
 
 # --- 1. CONFIGURACIÓN Y CLAVES ---
-# Configuración de Zona Horaria Colombia
 ZONA_HORARIA = pytz.timezone('America/Bogota')
 
 HORA_INICIO = time(0, 0)
@@ -49,7 +48,6 @@ USUARIOS = {
 # --- 2. FUNCIONES ---
 
 def obtener_hora_colombia():
-    """Devuelve la fecha y hora actual exacta en Colombia"""
     return datetime.now(ZONA_HORARIA)
 
 def asegurar_archivos():
@@ -107,15 +105,13 @@ def borrar_historial_completo():
 # --- 3. INTERFAZ ---
 st.set_page_config(page_title="Gestión Asistencia", layout="wide")
 
-# ESTADO DE SESIÓN (LOGIN)
 if 'usuario' not in st.session_state:
     st.session_state['usuario'] = None
 
-# --- PANTALLA DE LOGIN ---
+# LOGIN
 if st.session_state['usuario'] is None:
     st.title("🔐 Ingreso al Sistema")
     st.markdown("Por favor ingrese la clave asignada a su equipo.")
-    
     col1, col2 = st.columns([1, 2])
     with col1:
         password = st.text_input("Contraseña:", type="password")
@@ -127,17 +123,14 @@ if st.session_state['usuario'] is None:
                 st.error("Contraseña incorrecta.")
     st.stop() 
 
-# --- APLICACIÓN PRINCIPAL ---
-
+# APP PRINCIPAL
 usuario_actual = st.session_state['usuario']
 es_admin = (usuario_actual == "ADMIN")
 
 with st.sidebar:
     st.write(f"Hola, **{usuario_actual}**")
-    # Mostrar la hora actual de Colombia para verificar
     hora_co = obtener_hora_colombia().strftime("%I:%M %p")
     st.caption(f"Hora Colombia: {hora_co}")
-    
     if st.button("Cerrar Sesión"):
         st.session_state['usuario'] = None
         st.rerun()
@@ -146,17 +139,44 @@ st.title(f"📋 Asistencia: {usuario_actual if not es_admin else 'Vista Global'}
 
 asegurar_archivos()
 
+# ALERTA DE PENDIENTES (SOLO PARA ADMIN Y VISIBLE ARRIBA)
+if es_admin:
+    fecha_hoy_alert = obtener_hora_colombia().strftime("%Y-%m-%d")
+    df_empleados_all = cargar_csv(ARCHIVO_EMPLEADOS)
+    df_asistencia_all = cargar_csv(ARCHIVO_ASISTENCIA)
+    
+    # Filtramos asistencia de hoy
+    df_asistencia_hoy = df_asistencia_all[df_asistencia_all['Fecha'] == fecha_hoy_alert]
+    
+    # Creamos claves únicas (Equipo + Nombre) para comparar
+    if not df_empleados_all.empty:
+        df_empleados_all['Clave'] = df_empleados_all['Equipo'] + df_empleados_all['Nombre']
+        
+        registrados_hoy = []
+        if not df_asistencia_hoy.empty:
+            df_asistencia_hoy['Clave'] = df_asistencia_hoy['Equipo'] + df_asistencia_hoy['Nombre']
+            registrados_hoy = df_asistencia_hoy['Clave'].tolist()
+        
+        # Buscamos quienes NO están en la lista de hoy
+        df_faltantes = df_empleados_all[~df_empleados_all['Clave'].isin(registrados_hoy)].copy()
+        
+        if not df_faltantes.empty:
+            st.error(f"⚠️ ALERTA: Faltan {len(df_faltantes)} personas por reportar asistencia hoy ({fecha_hoy_alert}).")
+            with st.expander("Ver lista de pendientes por gestionar"):
+                st.dataframe(df_faltantes[['Equipo', 'Nombre', 'Cedula']], use_container_width=True)
+        else:
+            st.success(f"✅ ¡Excelente! Todo el personal (Total: {len(df_empleados_all)}) ha sido gestionado hoy.")
+
 if es_admin:
     tab_personal, tab_asistencia, tab_visual, tab_admin = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "📊 DASHBOARD GLOBAL", "🔐 ADMINISTRAR BD"])
 else:
     tab_personal, tab_asistencia, tab_visual = st.tabs(["👥 MI EQUIPO", "⚡ TOMAR ASISTENCIA", "📊 MI DASHBOARD"])
 
 # ==========================================
-# PESTAÑA 1: GESTIÓN PERSONAL
+# PESTAÑA 1: GESTIÓN
 # ==========================================
 with tab_personal:
     st.header("Base de Datos de Empleados")
-    
     if es_admin:
         equipo_gest = st.selectbox("Selecciona Equipo a Editar:", EQUIPOS_LISTA, key="sel_gest")
     else:
@@ -180,12 +200,10 @@ with tab_personal:
         st.rerun()
 
 # ==========================================
-# PESTAÑA 2: ASISTENCIA (COLA DE TRABAJO)
+# PESTAÑA 2: ASISTENCIA
 # ==========================================
 with tab_asistencia:
     st.header("Registro Diario (Pendientes)")
-    
-    # Usamos la hora colombiana
     ahora_co = obtener_hora_colombia()
     hora_actual = ahora_co.time()
     
@@ -195,7 +213,6 @@ with tab_asistencia:
         else:
             equipo_asist = usuario_actual
         
-        # Fecha exacta en Colombia
         fecha_hoy = ahora_co.strftime("%Y-%m-%d")
         
         df_db = cargar_csv(ARCHIVO_EMPLEADOS)
@@ -217,7 +234,7 @@ with tab_asistencia:
             df_input['Observacion'] = ""
             df_input['Soporte'] = None
             
-            st.info(f"📅 Fecha: {fecha_hoy} | ⏳ Pendientes por gestionar en {equipo_asist}: {len(df_input)}")
+            st.info(f"📅 Fecha: {fecha_hoy} | ⏳ Pendientes en {equipo_asist}: {len(df_input)}")
             
             df_asistencia_editada = st.data_editor(
                 df_input,
@@ -254,7 +271,7 @@ with tab_asistencia:
                 df_a_guardar = df_asistencia_editada.dropna(subset=['Estado'])
                 if not df_a_guardar.empty:
                     df_final = df_a_guardar.copy()
-                    df_final['Fecha'] = fecha_hoy # Usa la fecha corregida
+                    df_final['Fecha'] = fecha_hoy 
                     df_final['Equipo'] = equipo_asist
                     
                     lista_rutas = []
@@ -268,14 +285,13 @@ with tab_asistencia:
                     df_final['Soporte'] = lista_rutas
                     cols_finales = ['Fecha', 'Equipo', 'Nombre', 'Cedula', 'Estado', 'Observacion', 'Soporte']
                     guardar_asistencia(df_final[cols_finales])
-                    st.success(f"✅ {len(df_final)} registros guardados con fecha {fecha_hoy}.")
+                    st.success(f"✅ {len(df_final)} registros guardados.")
                     st.rerun()
                 else:
                     st.warning("Selecciona un estado para guardar.")
         else:
             if not df_personal_base.empty:
-                st.success(f"🎉 Todo el equipo {equipo_asist} ha sido gestionado hoy ({fecha_hoy}).")
-                st.balloons()
+                st.success(f"🎉 Equipo {equipo_asist} al día.")
             else:
                 st.warning("Este equipo aún no tiene personal.")
     else:
@@ -300,7 +316,6 @@ with tab_visual:
                 else:
                     st.markdown(f"**Equipo:** {usuario_actual}")
                     filtro_equipo = [usuario_actual]
-                    
             with col2:
                 filtro_fecha = st.multiselect("Filtrar Fecha:", df_hist["Fecha"].unique(), key="viz_fecha")
         
@@ -310,7 +325,6 @@ with tab_visual:
         if filtro_fecha:
             df_show = df_show[df_show["Fecha"].isin(filtro_fecha)]
             
-        # KPIs
         total_regs = len(df_show)
         if total_regs > 0:
             asistencias = len(df_show[df_show['Estado'] == 'Asiste'])
@@ -330,13 +344,11 @@ with tab_visual:
         
         st.divider()
 
-        # GRÁFICOS
         col_graf1, col_graf2 = st.columns(2)
         with col_graf1:
             st.subheader("Estados")
             if not df_show.empty:
                 st.bar_chart(df_show['Estado'].value_counts(), color="#4CAF50")
-            
         with col_graf2:
             if es_admin:
                 st.subheader("Comparativa por Equipos")
@@ -369,8 +381,6 @@ with tab_visual:
 if es_admin:
     with tab_admin:
         st.header("🔐 Administración Global")
-        st.info("Como Administrador (1234), tienes permisos totales.")
-        
         df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
         if not df_hist.empty:
             df_to_edit = df_hist.copy()
