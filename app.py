@@ -236,22 +236,40 @@ with tab_personal:
                 st.success("✅ Guardado.")
                 st.rerun()
 
-# 2. ASISTENCIA
+# 2. ASISTENCIA (MODIFICADO PARA ADMIN FECHAS PASADAS)
 with tab_asistencia:
     if not es_admin and not en_horario:
         st.error("⛔ Fuera de horario.")
     else:
-        st.header("Registro Diario")
-        fecha = obtener_hora_colombia().strftime("%Y-%m-%d")
-        equipo_asist = st.selectbox("Equipo:", equipos_disponibles, key="sa") if es_admin else usuario_actual
+        st.header("Registro de Asistencia")
+        
+        # --- LÓGICA DE FECHAS ---
+        if es_admin:
+            c_eq, c_fe = st.columns(2)
+            with c_eq:
+                equipo_asist = st.selectbox("Equipo:", equipos_disponibles, key="sa")
+            with c_fe:
+                # El admin puede elegir cualquier fecha
+                fecha_dt = st.date_input("📅 Fecha de Registro:", value=obtener_hora_colombia().date())
+                fecha = fecha_dt.strftime("%Y-%m-%d")
+        else:
+            # Usuarios normales bloqueados a HOY
+            equipo_asist = usuario_actual
+            fecha = obtener_hora_colombia().strftime("%Y-%m-%d")
+            st.info(f"📅 Registrando asistencia para HOY: {fecha}")
+
         if equipo_asist:
             df_all_emp = cargar_csv(ARCHIVO_EMPLEADOS)
             df_base = df_all_emp[df_all_emp['Equipo'] == equipo_asist] if not df_all_emp.empty and 'Equipo' in df_all_emp.columns else pd.DataFrame()
             df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
+            
+            # Buscamos registros YA HECHOS en la fecha seleccionada
             hechos = df_hist[(df_hist['Fecha'] == fecha) & (df_hist['Equipo'] == equipo_asist)]['Nombre'].tolist() if not df_hist.empty and 'Fecha' in df_hist.columns else []
+            
             pendientes = df_base[~df_base['Nombre'].isin(hechos)]
+            
             if not pendientes.empty:
-                st.info(f"Pendientes: {len(pendientes)}")
+                st.info(f"Pendientes en {equipo_asist} para el {fecha}: {len(pendientes)}")
                 df_input = pendientes[['Nombre', 'Cedula']].copy()
                 df_input['Estado'] = None
                 df_input['Observacion'] = ""
@@ -279,7 +297,7 @@ with tab_asistencia:
                 if st.button("💾 GUARDAR SELECCIONADOS"):
                     to_save = edited.dropna(subset=['Estado']).copy()
                     if not to_save.empty:
-                        to_save['Fecha'] = fecha
+                        to_save['Fecha'] = fecha # USA LA FECHA SELECCIONADA
                         to_save['Equipo'] = equipo_asist
                         paths = []
                         for _, r in to_save.iterrows():
@@ -287,51 +305,35 @@ with tab_asistencia:
                             paths.append(guardar_soporte(files.get(nm), nm, fecha) if nm in files else "")
                         to_save['Soporte'] = paths
                         guardar_asistencia(to_save[['Fecha', 'Equipo', 'Nombre', 'Cedula', 'Estado', 'Observacion', 'Soporte']])
-                        st.success("✅ Guardado.")
+                        st.success(f"✅ Guardado correctamente con fecha {fecha}.")
                         st.rerun()
                     else:
                         st.warning("Selecciona estados.")
             else:
-                st.success("🎉 Al día.")
+                st.success(f"🎉 Todo gestionado para el {fecha}.")
 
-# 3. DASHBOARD (MEJORADO)
+# 3. DASHBOARD
 with tab_visual:
     st.header("📊 Dashboard de Gestión")
     df_ver = cargar_csv(ARCHIVO_ASISTENCIA)
     
     if not df_ver.empty:
-        # Convertimos fecha a datetime para filtrar
         df_ver['Fecha_dt'] = pd.to_datetime(df_ver['Fecha']).dt.date
-        
-        # Filtros
         c1, c2 = st.columns(2)
         with c1:
-            # FILTRO DE FECHAS MEJORADO
             fecha_min = df_ver['Fecha_dt'].min()
             fecha_max = df_ver['Fecha_dt'].max()
-            try:
-                rango_fechas = st.date_input("📅 Rango de Fechas:", [fecha_min, fecha_max])
-            except:
-                rango_fechas = [fecha_min, fecha_max] # Fallback
-                
+            try: rango_fechas = st.date_input("📅 Rango de Fechas:", [fecha_min, fecha_max])
+            except: rango_fechas = [fecha_min, fecha_max]
         with c2:
             equipos_filtro = st.multiselect("Equipo:", df_ver['Equipo'].unique()) if es_admin else None
             
-        # Aplicar Filtros
         df_fil = df_ver.copy()
-        
         if len(rango_fechas) == 2:
-            df_fil = df_fil[
-                (df_fil['Fecha_dt'] >= rango_fechas[0]) & 
-                (df_fil['Fecha_dt'] <= rango_fechas[1])
-            ]
-            
-        if not es_admin: 
-            df_fil = df_fil[df_fil['Equipo'] == usuario_actual]
-        elif equipos_filtro: 
-            df_fil = df_fil[df_fil['Equipo'].isin(equipos_filtro)]
+            df_fil = df_fil[(df_fil['Fecha_dt'] >= rango_fechas[0]) & (df_fil['Fecha_dt'] <= rango_fechas[1])]
+        if not es_admin: df_fil = df_fil[df_fil['Equipo'] == usuario_actual]
+        elif equipos_filtro: df_fil = df_fil[df_fil['Equipo'].isin(equipos_filtro)]
         
-        # KPIs Globales
         if not df_fil.empty:
             total = len(df_fil)
             asistencia = len(df_fil[df_fil['Estado'] == 'Asiste'])
@@ -343,47 +345,30 @@ with tab_visual:
             k2.metric("% Asistencia", f"{(asistencia/total)*100:.1f}%")
             k3.metric("Llegadas Tarde", tardanza, delta_color="inverse")
             k4.metric("Ausencias", ausencia, delta_color="inverse")
-            
             st.divider()
             
-            # Tabla y Exportación
             st.subheader("📋 Detalle Filtrado")
             st.dataframe(df_fil, use_container_width=True)
-            
-            # BOTÓN DE DESCARGA
             csv = df_fil.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="⬇️ Descargar Reporte en Excel (CSV)",
-                data=csv,
-                file_name="reporte_asistencia.csv",
-                mime='text/csv'
-            )
+            st.download_button(label="⬇️ Descargar Reporte (CSV)", data=csv, file_name="reporte.csv", mime='text/csv')
             
-            # SECCIÓN: TRAYECTORIA INDIVIDUAL
             st.divider()
             st.subheader("👤 Trayectoria del Colaborador")
-            with st.expander("🔍 Consultar Trayectoria Individual"):
+            with st.expander("🔍 Consultar Trayectoria"):
                 colab_list = df_fil['Nombre'].unique()
                 seleccion_colab = st.selectbox("Seleccionar Colaborador:", colab_list)
-                
                 if seleccion_colab:
                     df_trayectoria = df_fil[df_fil['Nombre'] == seleccion_colab]
-                    
-                    # KPIs Personales
                     t_p = len(df_trayectoria)
                     t_tarde = len(df_trayectoria[df_trayectoria['Estado'] == 'Llegada tarde'])
                     t_aus = len(df_trayectoria[df_trayectoria['Estado'].isin(['Ausente', 'Incapacidad'])])
-                    
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Días Registrados", t_p)
                     m2.metric("Veces Tarde", t_tarde, delta_color="inverse")
-                    m3.metric("Incapacidades/Faltas", t_aus, delta_color="inverse")
-                    
-                    st.write("**Historial de Estados:**")
+                    m3.metric("Faltas", t_aus, delta_color="inverse")
                     st.bar_chart(df_trayectoria['Estado'].value_counts())
                     st.dataframe(df_trayectoria[['Fecha', 'Estado', 'Observacion']], use_container_width=True)
 
-            # VISOR
             st.divider()
             st.subheader("📂 Visor de Soportes")
             con_soporte = df_fil[df_fil['Soporte'].notna() & (df_fil['Soporte'].astype(str).str.len() > 5)]
@@ -398,12 +383,9 @@ with tab_visual:
                         if ruta.endswith(".pdf"): st.info("📄 Documento PDF disponible para descarga.")
                         else: st.image(ruta, caption="Vista previa", width=400)
                     else: st.error("❌ Archivo no encontrado.")
-            else:
-                st.info("No hay soportes en la selección.")
-        else:
-            st.warning("No hay datos en este rango de fechas.")
-    else:
-        st.info("Sin datos históricos.")
+            else: st.info("No hay soportes.")
+        else: st.warning("No hay datos en este rango.")
+    else: st.info("Sin datos históricos.")
 
 # 4. ADMIN (CONFIG Y CORRECCIONES)
 if es_admin:
