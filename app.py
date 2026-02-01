@@ -6,7 +6,7 @@ import json
 import shutil
 
 # --- 1. CONFIGURACIÓN ---
-st.set_page_config(page_title="Gestión Asistencia", layout="wide")
+st.set_page_config(page_title="Gestión Asistencia", layout="wide", page_icon="📊")
 
 # --- ZONA HORARIA ---
 try:
@@ -25,16 +25,9 @@ CARPETA_SOPORTES = 'soportes_img'
 # --- 2. SISTEMA DE SEGURIDAD (BLINDAJE TOTAL) ---
 
 def garantizar_columnas(df, columnas_requeridas):
-    """
-    Asegura que el DataFrame tenga las columnas necesarias.
-    Si faltan, las crea vacías para evitar KeyError.
-    """
-    if df is None:
-        return pd.DataFrame(columns=columnas_requeridas)
-    
+    if df is None: return pd.DataFrame(columns=columnas_requeridas)
     for col in columnas_requeridas:
-        if col not in df.columns:
-            df[col] = "" # Crear columna vacía si falta
+        if col not in df.columns: df[col] = "" 
     return df
 
 def crear_backup(archivo):
@@ -45,48 +38,27 @@ def crear_backup(archivo):
 def recuperar_desde_backup(archivo):
     backup = f"{archivo}.bak"
     if os.path.exists(backup):
-        try:
-            shutil.copy(backup, archivo)
-            return True
+        try: shutil.copy(backup, archivo); return True
         except: return False
     return False
 
 def cargar_csv_inteligente(archivo, columnas_esperadas):
-    """
-    Lee el CSV y garantiza que NUNCA devuelva un DataFrame sin columnas.
-    """
     df = pd.DataFrame(columns=columnas_esperadas)
-    
     if not os.path.exists(archivo):
-        if recuperar_desde_backup(archivo): pass
-        else: return df 
-
+        if not recuperar_desde_backup(archivo): return df 
     try:
-        # Intento 1: Lectura normal
         df_temp = pd.read_csv(archivo, dtype=str, keep_default_na=False)
-        df_temp.columns = df_temp.columns.str.strip() # Limpiar espacios
-        
-        # Si tiene las columnas, perfecto
-        if set(columnas_esperadas).issubset(df_temp.columns):
-            return df_temp
-        
-        # Intento 2: Si fallan los nombres, leemos sin header
+        df_temp.columns = df_temp.columns.str.strip()
+        if set(columnas_esperadas).issubset(df_temp.columns): return df_temp
         df_temp = pd.read_csv(archivo, header=None, dtype=str, keep_default_na=False)
         if len(df_temp.columns) >= len(columnas_esperadas):
-            # Asignamos nombres a las primeras columnas
             mapa = {i: col for i, col in enumerate(columnas_esperadas)}
             df_temp = df_temp.rename(columns=mapa)
-            # Filtramos header viejo
             if not df_temp.empty and str(df_temp.iloc[0][columnas_esperadas[0]]).lower() == columnas_esperadas[0].lower():
                 df_temp = df_temp.iloc[1:]
-            
-            # Garantizar que existan todas (incluso las que no mapeamos)
             return garantizar_columnas(df_temp, columnas_esperadas)
-            
         return garantizar_columnas(df_temp, columnas_esperadas)
-
-    except Exception:
-        return df # Retorna vacío pero CON COLUMNAS
+    except Exception: return df
 
 def guardar_csv_seguro(df, archivo):
     crear_backup(archivo)
@@ -119,8 +91,7 @@ def cargar_configuracion():
     except: return reiniciar_configuracion_default()
 
 def guardar_configuracion(diccionario_nuevo):
-    if "ADMIN" not in diccionario_nuevo:
-        diccionario_nuevo["ADMIN"] = {"password": "1234", "inicio": "00:00", "fin": "23:59"}
+    if "ADMIN" not in diccionario_nuevo: diccionario_nuevo["ADMIN"] = {"password": "1234", "inicio": "00:00", "fin": "23:59"}
     with open(ARCHIVO_PASSWORDS, 'w') as f: json.dump(diccionario_nuevo, f)
 
 def obtener_lista_equipos_dinamica():
@@ -146,16 +117,10 @@ def asegurar_archivos():
 def guardar_personal(df_nuevo, equipo_actual):
     cols = ["Equipo", "Nombre", "Cedula"]
     df_todos = cargar_csv_inteligente(ARCHIVO_EMPLEADOS, cols)
-    
-    # Asegurar que df_todos tenga columnas antes de filtrar
     df_todos = garantizar_columnas(df_todos, cols)
-
-    if not df_todos.empty:
-        df_todos = df_todos[df_todos['Equipo'] != equipo_actual]
-    
+    if not df_todos.empty: df_todos = df_todos[df_todos['Equipo'] != equipo_actual]
     df_nuevo = garantizar_columnas(df_nuevo, cols)
     df_nuevo['Equipo'] = equipo_actual
-    
     df_final = pd.concat([df_todos, df_nuevo], ignore_index=True)
     guardar_csv_seguro(df_final, ARCHIVO_EMPLEADOS)
 
@@ -186,19 +151,15 @@ def borrar_historial_completo():
     pd.DataFrame(columns=["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]).to_csv(ARCHIVO_ASISTENCIA, index=False)
 
 def reparar_base_datos_empleados():
-    """Fuerza la recreación de headers si el archivo está corrupto"""
     crear_backup(ARCHIVO_EMPLEADOS)
     cols = ["Equipo", "Nombre", "Cedula"]
-    # Leemos sin header
     try:
         df = pd.read_csv(ARCHIVO_EMPLEADOS, header=None, dtype=str)
         if len(df.columns) >= 3:
             df = df.rename(columns={0: 'Equipo', 1: 'Nombre', 2: 'Cedula'})
-            # Guardamos con los headers correctos
             df.to_csv(ARCHIVO_EMPLEADOS, index=False)
             return True
     except:
-        # Si falla todo, creamos vacío
         pd.DataFrame(columns=cols).to_csv(ARCHIVO_EMPLEADOS, index=False)
         return True
     return False
@@ -220,8 +181,7 @@ if st.session_state['usuario'] is None:
             else:
                 for eq, dat in config_db.items():
                     p_stored = dat.get('password') if isinstance(dat, dict) else dat
-                    if pwd == p_stored: 
-                        user_ok = eq; break
+                    if pwd == p_stored: user_ok = eq; break
             if user_ok: 
                 st.session_state['usuario'] = user_ok
                 st.rerun()
@@ -242,7 +202,7 @@ with st.sidebar:
         st.session_state['usuario'] = None
         st.rerun()
 
-st.title(f"📋 Asistencia: {usuario_actual if not es_admin else 'Vista Global'}")
+st.title(f"📊 Asistencia: {usuario_actual if not es_admin else 'Vista Gerencial'}")
 asegurar_archivos()
 
 # ALERTA ADMIN (BLINDADA)
@@ -251,7 +211,6 @@ if es_admin:
     df_emp = cargar_csv_inteligente(ARCHIVO_EMPLEADOS, ["Equipo", "Nombre", "Cedula"])
     df_asis = cargar_csv_inteligente(ARCHIVO_ASISTENCIA, ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"])
     
-    # Protección extra antes de procesar
     if not df_emp.empty and 'Key' not in df_emp.columns:
         df_emp = garantizar_columnas(df_emp, ["Equipo", "Nombre"])
         df_emp['Key'] = df_emp['Equipo'].astype(str) + df_emp['Nombre'].astype(str)
@@ -267,19 +226,19 @@ if es_admin:
         
         pendientes = df_emp[~df_emp['Key'].isin(hechos)]
         if not pendientes.empty:
-            st.error(f"⚠️ Faltan {len(pendientes)} personas hoy.")
+            st.error(f"⚠️ Alerta de Gestión: Faltan {len(pendientes)} personas hoy.")
             if 'Equipo' in pendientes.columns:
                 resumen = pendientes['Equipo'].value_counts().reset_index()
                 resumen.columns = ['Equipo', 'Pendientes']
                 c1, c2 = st.columns([1, 2])
                 with c1: st.dataframe(resumen, hide_index=True, use_container_width=True)
                 with c2: 
-                    with st.expander("Ver lista"): st.dataframe(pendientes[['Equipo', 'Nombre']], hide_index=True)
+                    with st.expander("Ver lista detallada"): st.dataframe(pendientes[['Equipo', 'Nombre']], hide_index=True)
             st.divider()
 
 # PESTAÑAS
 if es_admin:
-    tab_personal, tab_asistencia, tab_visual, tab_admin = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "📊 DASHBOARD & TRAYECTORIA", "🔐 ADMINISTRAR"])
+    tab_personal, tab_asistencia, tab_visual, tab_admin = st.tabs(["👥 GESTIONAR PERSONAL", "⚡ TOMAR ASISTENCIA", "📈 DASHBOARD GERENCIAL", "🔐 ADMINISTRAR"])
 else:
     tab_personal, tab_asistencia, tab_visual = st.tabs(["👥 MI EQUIPO", "⚡ TOMAR ASISTENCIA", "📊 MI DASHBOARD"])
 
@@ -291,19 +250,11 @@ with tab_personal:
         eg = st.selectbox("Equipo:", equipos_disponibles, key="sg") if es_admin else usuario_actual
         if eg:
             df_db = cargar_csv_inteligente(ARCHIVO_EMPLEADOS, ["Equipo", "Nombre", "Cedula"])
-            
-            # Filtro seguro
-            if not df_db.empty and 'Equipo' in df_db.columns:
-                df_show = df_db[df_db['Equipo'] == eg]
-            else:
-                df_show = pd.DataFrame(columns=["Equipo", "Nombre", "Cedula"])
-            
-            # Asegurar columnas para el editor
+            if not df_db.empty and 'Equipo' in df_db.columns: df_show = df_db[df_db['Equipo'] == eg]
+            else: df_show = pd.DataFrame(columns=["Equipo", "Nombre", "Cedula"])
             df_show = garantizar_columnas(df_show, ["Nombre", "Cedula"])
-            df_show = df_show[["Nombre", "Cedula"]] # Solo mostrar estas
-            
+            df_show = df_show[["Nombre", "Cedula"]] 
             df_edit = st.data_editor(df_show, num_rows="dynamic", use_container_width=True, key="edit_pers")
-            
             if st.button("💾 GUARDAR CAMBIOS PERSONAL"):
                 guardar_personal(df_edit, eg)
                 st.success("✅ Guardado y Respaldado.")
@@ -325,15 +276,9 @@ with tab_asistencia:
             st.info(f"📅 HOY: {fecha}")
 
         if ea:
-            # CARGA SEGURA Y GARANTÍA DE COLUMNAS
             df_all = cargar_csv_inteligente(ARCHIVO_EMPLEADOS, ["Equipo", "Nombre", "Cedula"])
-            
-            if not df_all.empty and 'Equipo' in df_all.columns:
-                df_base = df_all[df_all['Equipo'] == ea]
-            else:
-                df_base = pd.DataFrame(columns=["Equipo", "Nombre", "Cedula"])
-            
-            # Garantizar que df_base tenga columna Nombre aunque esté vacío
+            if not df_all.empty and 'Equipo' in df_all.columns: df_base = df_all[df_all['Equipo'] == ea]
+            else: df_base = pd.DataFrame(columns=["Equipo", "Nombre", "Cedula"])
             df_base = garantizar_columnas(df_base, ["Nombre", "Cedula"])
 
             df_hist = cargar_csv_inteligente(ARCHIVO_ASISTENCIA, ["Fecha", "Equipo", "Nombre"])
@@ -341,7 +286,6 @@ with tab_asistencia:
             if not df_hist.empty and 'Fecha' in df_hist.columns and 'Equipo' in df_hist.columns:
                 hechos = df_hist[(df_hist['Fecha'] == fecha) & (df_hist['Equipo'] == ea)]['Nombre'].tolist()
             
-            # FILTRO SEGURO (Aquí es donde fallaba antes)
             pendientes = df_base[~df_base['Nombre'].isin(hechos)]
             
             if not pendientes.empty:
@@ -383,82 +327,117 @@ with tab_asistencia:
                             nm = r['Nombre']
                             paths.append(guardar_soporte(files.get(nm), nm, fecha) if nm in files else "")
                         to_save['Soporte'] = paths
-                        # Garantizar columnas antes de guardar
                         to_save = garantizar_columnas(to_save, ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"])
                         guardar_asistencia(to_save)
                         st.success("✅ Guardado.")
                         st.rerun()
                     else: st.warning("Selecciona estados.")
             else:
-                if df_base.empty:
-                    st.warning(f"No hay empleados registrados en el equipo '{ea}'. Ve a 'Gestionar Personal' para agregarlos.")
-                else:
-                    st.success("🎉 Todo listo.")
+                if df_base.empty: st.warning(f"No hay empleados en '{ea}'.")
+                else: st.success("🎉 Todo gestionado.")
 
-# 3. DASHBOARD
+# 3. DASHBOARD MEJORADO
 with tab_visual:
-    st.header("📊 Dashboard")
+    st.header("📊 Dashboard Gerencial")
     df_ver = cargar_csv_inteligente(ARCHIVO_ASISTENCIA, ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"])
     
     if not df_ver.empty and 'Fecha' in df_ver.columns:
         df_ver['Fecha_dt'] = pd.to_datetime(df_ver['Fecha']).dt.date
-        c1, c2 = st.columns(2)
-        fmin, fmax = df_ver['Fecha_dt'].min(), df_ver['Fecha_dt'].max()
-        try: rango = c1.date_input("Rango:", [fmin, fmax])
-        except: rango = [fmin, fmax]
         
-        # Filtro seguro de equipo
-        equipos_unicos = df_ver['Equipo'].unique() if 'Equipo' in df_ver.columns else []
-        eq_fil = c2.multiselect("Equipo:", equipos_unicos) if es_admin else None
+        # Filtros
+        with st.container():
+            c1, c2 = st.columns(2)
+            fmin, fmax = df_ver['Fecha_dt'].min(), df_ver['Fecha_dt'].max()
+            try: rango = c1.date_input("📅 Periodo de Análisis:", [fmin, fmax])
+            except: rango = [fmin, fmax]
+            
+            eq_fil = None
+            if es_admin:
+                equipos_unicos = df_ver['Equipo'].unique() if 'Equipo' in df_ver.columns else []
+                eq_fil = c2.multiselect("🏢 Filtrar por Equipo:", equipos_unicos)
         
+        # Lógica de Filtrado
         df_fil = df_ver.copy()
         if len(rango) == 2: df_fil = df_fil[(df_fil['Fecha_dt'] >= rango[0]) & (df_fil['Fecha_dt'] <= rango[1])]
         if not es_admin: 
-            if 'Equipo' in df_fil.columns:
-                df_fil = df_fil[df_fil['Equipo'] == usuario_actual]
+            if 'Equipo' in df_fil.columns: df_fil = df_fil[df_fil['Equipo'] == usuario_actual]
         elif eq_fil: 
             df_fil = df_fil[df_fil['Equipo'].isin(eq_fil)]
         
+        st.divider()
+
         if not df_fil.empty:
+            # KPIS
             tot = len(df_fil)
             asi = len(df_fil[df_fil['Estado'] == 'Asiste']) if 'Estado' in df_fil.columns else 0
+            tar = len(df_fil[df_fil['Estado'] == 'Llegada tarde']) if 'Estado' in df_fil.columns else 0
+            aus = len(df_fil[df_fil['Estado'].isin(['Ausente', 'Incapacidad'])]) if 'Estado' in df_fil.columns else 0
+            
+            porc = (asi/tot)*100 if tot > 0 else 0
+            
             k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Total", tot)
-            k2.metric("% Asis", f"{(asi/tot)*100:.1f}%" if tot > 0 else "0%")
+            k1.metric("Total Registros", tot, border=True)
+            k2.metric("% Cumplimiento", f"{porc:.1f}%", delta=f"{porc-100:.1f}%", border=True)
+            k3.metric("Llegadas Tarde", tar, delta=-tar, delta_color="inverse", border=True)
+            k4.metric("Ausencias Críticas", aus, delta=-aus, delta_color="inverse", border=True)
             
+            # GRÁFICOS
+            st.subheader("📈 Análisis Visual")
+            col_g1, col_g2 = st.columns(2)
+            
+            with col_g1:
+                st.caption("Distribución de Estados")
+                if 'Estado' in df_fil.columns:
+                    st.bar_chart(df_fil['Estado'].value_counts(), color="#29b5e8")
+            
+            with col_g2:
+                st.caption("Evolución Diaria (Asistencias)")
+                if 'Fecha' in df_fil.columns and 'Estado' in df_fil.columns:
+                    # Crear tabla pivote para línea de tiempo
+                    df_linea = df_fil[df_fil['Estado'] == 'Asiste'].groupby('Fecha').size()
+                    st.line_chart(df_linea, color="#4CAF50")
+
             st.divider()
+            
+            # TABLA DE DATOS
+            st.subheader("📋 Detalle de Registros")
             st.dataframe(df_fil, use_container_width=True)
-            st.download_button("⬇️ CSV", df_fil.to_csv(index=False).encode('utf-8'), "reporte.csv", "text/csv")
+            st.download_button("⬇️ Descargar Reporte Excel (CSV)", df_fil.to_csv(index=False).encode('utf-8'), "reporte_asistencia.csv", "text/csv")
             
             st.divider()
-            with st.expander("🔍 Trayectoria Individual"):
+            
+            # TRAYECTORIA
+            with st.expander("👤 Consultar Trayectoria Individual"):
                 nombres = df_fil['Nombre'].unique() if 'Nombre' in df_fil.columns else []
-                col = st.selectbox("Nombre:", nombres)
+                col = st.selectbox("Buscar Colaborador:", nombres)
                 if col:
                     dft = df_fil[df_fil['Nombre'] == col]
-                    if 'Estado' in dft.columns:
-                        st.bar_chart(dft['Estado'].value_counts())
-                    st.dataframe(dft[['Fecha','Estado','Observacion']])
+                    c_t1, c_t2 = st.columns([1, 3])
+                    with c_t1:
+                        st.write(f"**{col}**")
+                        if 'Estado' in dft.columns:
+                            st.write(dft['Estado'].value_counts())
+                    with c_t2:
+                        st.dataframe(dft[['Fecha','Estado','Observacion']], use_container_width=True)
             
-            st.divider()
-            with st.expander("📂 Soportes"):
+            with st.expander("📂 Ver Soportes Adjuntos"):
                 if 'Soporte' in df_fil.columns:
                     con_s = df_fil[df_fil['Soporte'].notna() & (df_fil['Soporte'].astype(str).str.len() > 5)]
                     if not con_s.empty:
-                        s = st.selectbox("Ver:", con_s['Nombre'] + " - " + con_s['Fecha'])
+                        s = st.selectbox("Seleccionar Soporte:", con_s['Nombre'] + " - " + con_s['Fecha'])
                         if s:
                             r = con_s[con_s['Nombre'] + " - " + con_s['Fecha'] == s].iloc[0]['Soporte']
                             if os.path.exists(r):
-                                with open(r, "rb") as f: st.download_button("Descargar", f, os.path.basename(r))
-                                if r.endswith(".pdf"): st.info("PDF")
+                                with open(r, "rb") as f: st.download_button("Descargar Archivo", f, os.path.basename(r))
+                                if r.endswith(".pdf"): st.info("📄 Archivo PDF")
                                 else: st.image(r, width=300)
-    else: st.info("Sin datos.")
+    else: st.info("No hay datos para mostrar en este rango.")
 
 # 4. ADMIN
 if es_admin:
     with tab_admin:
         st.header("🔐 Admin")
-        with st.expander("🔑 EQUIPOS"):
+        with st.expander("🔑 CONFIGURACIÓN (Equipos y Horarios)"):
             dl = []
             for t, d in config_db.items():
                 p = d.get('password','') if isinstance(d, dict) else str(d)
@@ -474,27 +453,25 @@ if es_admin:
                     n = str(r['Usuario/Equipo']).strip()
                     if n: new_c[n] = {"password": str(r['Contraseña']), "inicio": r['Inicio'].strftime("%H:%M") if r['Inicio'] else "00:00", "fin": r['Fin'].strftime("%H:%M") if r['Fin'] else "23:59"}
                 guardar_configuracion(new_c)
-                st.success("Ok.")
+                st.success("Configuración actualizada.")
                 st.rerun()
         
         st.divider()
-        st.subheader("🛠️ Corregir")
+        st.subheader("🛠️ Mantenimiento")
         df_full = cargar_csv_inteligente(ARCHIVO_ASISTENCIA, ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"])
         if not df_full.empty:
             df_full.insert(0, "Borrar", False)
             edf = st.data_editor(df_full, hide_index=True, use_container_width=True, key="edadm")
-            if st.button("💾 APLICAR"):
+            if st.button("💾 APLICAR CORRECCIONES"):
                 sobrescribir_asistencia_completa(edf[edf["Borrar"]==False])
-                st.success("Hecho.")
+                st.success("Historial actualizado.")
                 st.rerun()
-            if st.button("🔴 BORRAR TODO"):
+            if st.button("🔴 BORRAR TODO EL HISTORIAL"):
                 borrar_historial_completo()
                 st.rerun()
         
         st.divider()
-        st.markdown("### 🚑 Zona de Emergencia")
-        st.warning("Usa esto solo si ves errores de 'KeyError' o tablas vacías.")
-        if st.button("🚨 REPARAR ARCHIVOS DAÑADOS"):
+        if st.button("🚨 REPARAR ARCHIVOS (Emergencia)"):
             reparar_base_datos_empleados()
-            st.success("Archivos reconstruidos. Intenta usar la app ahora.")
+            st.success("Sistema reparado. Intente nuevamente.")
             st.rerun()
