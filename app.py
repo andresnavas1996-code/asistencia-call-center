@@ -344,7 +344,6 @@ with tab_visual:
     if not df_ver.empty and 'Fecha' in df_ver.columns:
         df_ver['Fecha_dt'] = pd.to_datetime(df_ver['Fecha']).dt.date
         
-        # Filtros
         with st.container():
             c1, c2 = st.columns(2)
             fmin, fmax = df_ver['Fecha_dt'].min(), df_ver['Fecha_dt'].max()
@@ -356,7 +355,6 @@ with tab_visual:
                 equipos_unicos = df_ver['Equipo'].unique() if 'Equipo' in df_ver.columns else []
                 eq_fil = c2.multiselect("🏢 Filtrar por Equipo:", equipos_unicos)
         
-        # Lógica de Filtrado
         df_fil = df_ver.copy()
         if len(rango) == 2: df_fil = df_fil[(df_fil['Fecha_dt'] >= rango[0]) & (df_fil['Fecha_dt'] <= rango[1])]
         if not es_admin: 
@@ -367,7 +365,6 @@ with tab_visual:
         st.divider()
 
         if not df_fil.empty:
-            # KPIS
             tot = len(df_fil)
             asi = len(df_fil[df_fil['Estado'] == 'Asiste']) if 'Estado' in df_fil.columns else 0
             tar = len(df_fil[df_fil['Estado'] == 'Llegada tarde']) if 'Estado' in df_fil.columns else 0
@@ -381,32 +378,33 @@ with tab_visual:
             k3.metric("Llegadas Tarde", tar, delta=-tar, delta_color="inverse", border=True)
             k4.metric("Ausencias Críticas", aus, delta=-aus, delta_color="inverse", border=True)
             
-            # GRÁFICOS
-            st.subheader("📈 Análisis Visual")
+            # --- GRÁFICOS NUEVOS ---
+            st.subheader("📈 Análisis de Novedades")
             col_g1, col_g2 = st.columns(2)
             
             with col_g1:
-                st.caption("Distribución de Estados")
+                st.caption("Distribución General")
                 if 'Estado' in df_fil.columns:
                     st.bar_chart(df_fil['Estado'].value_counts(), color="#29b5e8")
             
             with col_g2:
-                st.caption("Evolución Diaria (Asistencias)")
-                if 'Fecha' in df_fil.columns and 'Estado' in df_fil.columns:
-                    # Crear tabla pivote para línea de tiempo
-                    df_linea = df_fil[df_fil['Estado'] == 'Asiste'].groupby('Fecha').size()
-                    st.line_chart(df_linea, color="#4CAF50")
+                st.caption("🚨 Ranking: Equipos con más Novedades (Tardes/Ausencias)")
+                # Filtramos solo lo malo
+                df_nov = df_fil[df_fil['Estado'].isin(['Llegada tarde', 'Ausente', 'Incapacidad'])]
+                if not df_nov.empty and 'Equipo' in df_nov.columns:
+                    ranking = df_nov['Equipo'].value_counts()
+                    st.bar_chart(ranking, color="#ff4b4b") # ROJO DE ALERTA
+                else:
+                    st.success("¡Excelente! No hay novedades negativas en este periodo.")
 
             st.divider()
             
-            # TABLA DE DATOS
             st.subheader("📋 Detalle de Registros")
             st.dataframe(df_fil, use_container_width=True)
             st.download_button("⬇️ Descargar Reporte Excel (CSV)", df_fil.to_csv(index=False).encode('utf-8'), "reporte_asistencia.csv", "text/csv")
             
             st.divider()
             
-            # TRAYECTORIA
             with st.expander("👤 Consultar Trayectoria Individual"):
                 nombres = df_fil['Nombre'].unique() if 'Nombre' in df_fil.columns else []
                 col = st.selectbox("Buscar Colaborador:", nombres)
