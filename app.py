@@ -6,9 +6,9 @@ import json
 import shutil
 
 # --- 1. CONFIGURACIÓN ---
-st.set_page_config(page_title="Gestión Asistencia", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Gestión Asistencia", layout="wide", page_icon="🛡️")
 
-# --- ZONA HORARIA ---
+# --- ZONA HORARIA ROBUSTA ---
 try:
     import pytz
     ZONA_HORARIA = pytz.timezone('America/Bogota')
@@ -22,49 +22,86 @@ ARCHIVO_EMPLEADOS = 'base_datos_empleados.csv'
 ARCHIVO_PASSWORDS = 'config_passwords_v4.json' 
 CARPETA_SOPORTES = 'soportes_img' 
 
-# --- 2. SISTEMA DE SEGURIDAD (BLINDAJE TOTAL) ---
+# --- 2. SISTEMA DE SEGURIDAD (AUTOCURACIÓN) ---
 
 def garantizar_columnas(df, columnas_requeridas):
-    if df is None: return pd.DataFrame(columns=columnas_requeridas)
+    """Asegura que las columnas existan en memoria para evitar crash."""
+    if df is None or df.empty:
+        return pd.DataFrame(columns=columnas_requeridas)
+    
     for col in columnas_requeridas:
-        if col not in df.columns: df[col] = "" 
+        if col not in df.columns:
+            df[col] = "" # Inyectar columna vacía si falta
     return df
 
 def crear_backup(archivo):
-    if os.path.exists(archivo):
+    """Crea una copia de seguridad antes de escribir."""
+    if os.path.exists(archivo) and os.path.getsize(archivo) > 0:
         try: shutil.copy(archivo, f"{archivo}.bak")
         except: pass
 
 def recuperar_desde_backup(archivo):
+    """Si el archivo principal falla, intenta leer el backup."""
     backup = f"{archivo}.bak"
-    if os.path.exists(backup):
-        try: shutil.copy(backup, archivo); return True
+    if os.path.exists(backup) and os.path.getsize(backup) > 0:
+        try:
+            shutil.copy(backup, archivo)
+            return True
         except: return False
     return False
 
 def cargar_csv_inteligente(archivo, columnas_esperadas):
-    df = pd.DataFrame(columns=columnas_esperadas)
-    if not os.path.exists(archivo):
-        if not recuperar_desde_backup(archivo): return df 
+    """
+    Lectura a prueba de fallos. Si el archivo está corrupto, vacío o sin headers,
+    lo repara en vuelo sin detener la app.
+    """
+    # 1. Si no existe o está vacío (0 bytes)
+    if not os.path.exists(archivo) or os.path.getsize(archivo) == 0:
+        if not recuperar_desde_backup(archivo):
+            # Si no hay backup, retornamos estructura vacía limpia
+            return pd.DataFrame(columns=columnas_esperadas)
+
     try:
-        df_temp = pd.read_csv(archivo, dtype=str, keep_default_na=False)
-        df_temp.columns = df_temp.columns.str.strip()
-        if set(columnas_esperadas).issubset(df_temp.columns): return df_temp
-        df_temp = pd.read_csv(archivo, header=None, dtype=str, keep_default_na=False)
-        if len(df_temp.columns) >= len(columnas_esperadas):
-            mapa = {i: col for i, col in enumerate(columnas_esperadas)}
-            df_temp = df_temp.rename(columns=mapa)
-            if not df_temp.empty and str(df_temp.iloc[0][columnas_esperadas[0]]).lower() == columnas_esperadas[0].lower():
-                df_temp = df_temp.iloc[1:]
-            return garantizar_columnas(df_temp, columnas_esperadas)
-        return garantizar_columnas(df_temp, columnas_esperadas)
-    except Exception: return df
+        # 2. Intento de lectura estándar
+        df = pd.read_csv(archivo, dtype=str, keep_default_na=False)
+        df.columns = df.columns.str.strip() # Limpiar espacios
+        
+        # 3. Si faltan columnas, verificamos si es un problema de headers
+        if not set(columnas_esperadas).issubset(df.columns):
+            # Intentamos leer sin header
+            df_raw = pd.read_csv(archivo, header=None, dtype=str, keep_default_na=False)
+            if len(df_raw.columns) >= len(columnas_esperadas):
+                # Asignamos nombres manualmente
+                mapa = {i: col for i, col in enumerate(columnas_esperadas)}
+                df_raw = df_raw.rename(columns=mapa)
+                # Filtramos si la primera fila era basura
+                if not df_raw.empty and str(df_raw.iloc[0][columnas_esperadas[0]]).lower() == columnas_esperadas[0].lower():
+                    df_raw = df_raw.iloc[1:]
+                return garantizar_columnas(df_raw, columnas_esperadas)
+        
+        return garantizar_columnas(df, columnas_esperadas)
+
+    except Exception:
+        # 4. Si todo falla (archivo corrupto binario), retornamos vacío pero ESTRUCTURADO
+        # Esto evita el Error Rojo en pantalla
+        return pd.DataFrame(columns=columnas_esperadas)
 
 def guardar_csv_seguro(df, archivo):
+    """Guarda con backup previo."""
     crear_backup(archivo)
     df.to_csv(archivo, index=False)
 
-# --- 3. FUNCIONES DE LÓGICA ---
+def asegurar_archivos():
+    """Verifica existencia de carpetas y archivos críticos al inicio."""
+    if not os.path.exists(CARPETA_SOPORTES): os.makedirs(CARPETA_SOPORTES)
+    
+    # Crear archivos si no existen para evitar primer error
+    if not os.path.exists(ARCHIVO_EMPLEADOS):
+        pd.DataFrame(columns=["Equipo", "Nombre", "Cedula"]).to_csv(ARCHIVO_EMPLEADOS, index=False)
+    if not os.path.exists(ARCHIVO_ASISTENCIA):
+        pd.DataFrame(columns=["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]).to_csv(ARCHIVO_ASISTENCIA, index=False)
+
+# --- 3. LÓGICA DE NEGOCIO ---
 
 def reiniciar_configuracion_default():
     defaults = {
@@ -111,16 +148,14 @@ def verificar_horario(usuario):
         except: return True 
     return True
 
-def asegurar_archivos():
-    if not os.path.exists(CARPETA_SOPORTES): os.makedirs(CARPETA_SOPORTES)
-
 def guardar_personal(df_nuevo, equipo_actual):
     cols = ["Equipo", "Nombre", "Cedula"]
     df_todos = cargar_csv_inteligente(ARCHIVO_EMPLEADOS, cols)
-    df_todos = garantizar_columnas(df_todos, cols)
     if not df_todos.empty: df_todos = df_todos[df_todos['Equipo'] != equipo_actual]
+    
     df_nuevo = garantizar_columnas(df_nuevo, cols)
     df_nuevo['Equipo'] = equipo_actual
+    
     df_final = pd.concat([df_todos, df_nuevo], ignore_index=True)
     guardar_csv_seguro(df_final, ARCHIVO_EMPLEADOS)
 
@@ -151,6 +186,7 @@ def borrar_historial_completo():
     pd.DataFrame(columns=["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]).to_csv(ARCHIVO_ASISTENCIA, index=False)
 
 def reparar_base_datos_empleados():
+    """Función de emergencia para el botón Admin."""
     crear_backup(ARCHIVO_EMPLEADOS)
     cols = ["Equipo", "Nombre", "Cedula"]
     try:
@@ -168,6 +204,7 @@ def reparar_base_datos_empleados():
 
 if 'usuario' not in st.session_state: st.session_state['usuario'] = None
 config_db = cargar_configuracion()
+asegurar_archivos() # Ejecutar al inicio siempre
 
 # --- LOGIN ---
 if st.session_state['usuario'] is None:
@@ -203,7 +240,6 @@ with st.sidebar:
         st.rerun()
 
 st.title(f"📊 Asistencia: {usuario_actual if not es_admin else 'Vista Gerencial'}")
-asegurar_archivos()
 
 # ALERTA ADMIN (BLINDADA)
 if es_admin:
@@ -211,11 +247,11 @@ if es_admin:
     df_emp = cargar_csv_inteligente(ARCHIVO_EMPLEADOS, ["Equipo", "Nombre", "Cedula"])
     df_asis = cargar_csv_inteligente(ARCHIVO_ASISTENCIA, ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"])
     
-    if not df_emp.empty and 'Key' not in df_emp.columns:
+    if not df_emp.empty:
+        # Aseguramos que existan las columnas antes de operar
         df_emp = garantizar_columnas(df_emp, ["Equipo", "Nombre"])
         df_emp['Key'] = df_emp['Equipo'].astype(str) + df_emp['Nombre'].astype(str)
         
-    if not df_emp.empty:
         hechos = []
         if not df_asis.empty:
             df_asis = garantizar_columnas(df_asis, ["Fecha", "Equipo", "Nombre"])
@@ -250,14 +286,21 @@ with tab_personal:
         eg = st.selectbox("Equipo:", equipos_disponibles, key="sg") if es_admin else usuario_actual
         if eg:
             df_db = cargar_csv_inteligente(ARCHIVO_EMPLEADOS, ["Equipo", "Nombre", "Cedula"])
-            if not df_db.empty and 'Equipo' in df_db.columns: df_show = df_db[df_db['Equipo'] == eg]
-            else: df_show = pd.DataFrame(columns=["Equipo", "Nombre", "Cedula"])
+            
+            # Filtro seguro
+            if not df_db.empty and 'Equipo' in df_db.columns:
+                df_show = df_db[df_db['Equipo'] == eg]
+            else:
+                df_show = pd.DataFrame(columns=["Equipo", "Nombre", "Cedula"])
+            
+            # Limpieza para el editor
             df_show = garantizar_columnas(df_show, ["Nombre", "Cedula"])
             df_show = df_show[["Nombre", "Cedula"]] 
+            
             df_edit = st.data_editor(df_show, num_rows="dynamic", use_container_width=True, key="edit_pers")
             if st.button("💾 GUARDAR CAMBIOS PERSONAL"):
                 guardar_personal(df_edit, eg)
-                st.success("✅ Guardado y Respaldado.")
+                st.success("✅ Guardado.")
                 st.rerun()
 
 # 2. ASISTENCIA
@@ -279,7 +322,8 @@ with tab_asistencia:
             df_all = cargar_csv_inteligente(ARCHIVO_EMPLEADOS, ["Equipo", "Nombre", "Cedula"])
             if not df_all.empty and 'Equipo' in df_all.columns: df_base = df_all[df_all['Equipo'] == ea]
             else: df_base = pd.DataFrame(columns=["Equipo", "Nombre", "Cedula"])
-            df_base = garantizar_columnas(df_base, ["Nombre", "Cedula"])
+            
+            df_base = garantizar_columnas(df_base, ["Nombre", "Cedula"]) # Seguridad extra
 
             df_hist = cargar_csv_inteligente(ARCHIVO_ASISTENCIA, ["Fecha", "Equipo", "Nombre"])
             hechos = []
@@ -389,11 +433,10 @@ with tab_visual:
             
             with col_g2:
                 st.caption("🚨 Ranking: Equipos con más Novedades (Tardes/Ausencias)")
-                # Filtramos solo lo malo
                 df_nov = df_fil[df_fil['Estado'].isin(['Llegada tarde', 'Ausente', 'Incapacidad'])]
                 if not df_nov.empty and 'Equipo' in df_nov.columns:
                     ranking = df_nov['Equipo'].value_counts()
-                    st.bar_chart(ranking, color="#ff4b4b") # ROJO DE ALERTA
+                    st.bar_chart(ranking, color="#ff4b4b") 
                 else:
                     st.success("¡Excelente! No hay novedades negativas en este periodo.")
 
@@ -469,7 +512,8 @@ if es_admin:
                 st.rerun()
         
         st.divider()
-        if st.button("🚨 REPARAR ARCHIVOS (Emergencia)"):
+        st.markdown("### 🚑 Zona de Emergencia")
+        if st.button("🚨 REPARAR ARCHIVOS DAÑADOS"):
             reparar_base_datos_empleados()
-            st.success("Sistema reparado. Intente nuevamente.")
+            st.success("Archivos reconstruidos automáticamente. Intente usar la app ahora.")
             st.rerun()
