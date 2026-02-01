@@ -7,15 +7,13 @@ import json
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="Gestión Asistencia", layout="wide")
 
-# --- MANEJO DE ZONA HORARIA A PRUEBA DE FALLOS ---
+# --- ZONA HORARIA BLINDADA ---
 try:
     import pytz
     ZONA_HORARIA = pytz.timezone('America/Bogota')
-    def obtener_hora_actual():
-        return datetime.now(ZONA_HORARIA)
+    def obtener_hora_actual(): return datetime.now(ZONA_HORARIA)
 except ImportError:
-    def obtener_hora_actual():
-        return datetime.utcnow() - timedelta(hours=5)
+    def obtener_hora_actual(): return datetime.utcnow() - timedelta(hours=5)
 
 # Archivos
 ARCHIVO_ASISTENCIA = 'asistencia_historica.csv'
@@ -23,7 +21,37 @@ ARCHIVO_EMPLEADOS = 'base_datos_empleados.csv'
 ARCHIVO_PASSWORDS = 'config_passwords_v4.json' 
 CARPETA_SOPORTES = 'soportes_img' 
 
-# --- 2. FUNCIONES ROBUSTAS (CON AUTORREPARACIÓN) ---
+# --- 2. FUNCIONES DE AUTORREPARACIÓN (CIRUGÍA MAYOR) ---
+
+def cargar_csv_blindado(ruta_archivo, columnas_obligatorias):
+    """
+    Intenta leer el CSV. Si falla, falta algo o está corrupto,
+    LO RECREA DESDE CERO para evitar el KeyError.
+    """
+    reparar = False
+    df_final = pd.DataFrame(columns=columnas_obligatorias)
+    
+    if not os.path.exists(ruta_archivo):
+        reparar = True
+    else:
+        try:
+            # Intentamos leer
+            df_temp = pd.read_csv(ruta_archivo, dtype=str, keep_default_na=False)
+            
+            # Verificamos si tiene las columnas necesarias
+            if not set(columnas_obligatorias).issubset(df_temp.columns):
+                reparar = True # Faltan columnas, está corrupto
+            else:
+                df_final = df_temp # Está sano
+        except:
+            reparar = True # Error de lectura, está corrupto
+            
+    if reparar:
+        # Si está dañado, lo sobrescribimos con uno limpio y vacío
+        df_final = pd.DataFrame(columns=columnas_obligatorias)
+        df_final.to_csv(ruta_archivo, index=False)
+        
+    return df_final
 
 def reiniciar_configuracion_default():
     defaults = {
@@ -34,35 +62,29 @@ def reiniciar_configuracion_default():
         "Servicio al cliente": {"password": "4", "inicio": "00:00", "fin": "23:59"}
     }
     try:
-        with open(ARCHIVO_PASSWORDS, 'w') as f:
-            json.dump(defaults, f)
-    except:
-        pass
+        with open(ARCHIVO_PASSWORDS, 'w') as f: json.dump(defaults, f)
+    except: pass
     return defaults
 
 def cargar_configuracion():
-    if not os.path.exists(ARCHIVO_PASSWORDS):
-        return reiniciar_configuracion_default()
+    if not os.path.exists(ARCHIVO_PASSWORDS): return reiniciar_configuracion_default()
     try:
         with open(ARCHIVO_PASSWORDS, 'r') as f:
             data = json.load(f)
-            if not data or not isinstance(data, dict): return reiniciar_configuracion_default()
+            if not isinstance(data, dict): return reiniciar_configuracion_default()
             for k, v in data.items():
                 if isinstance(v, str): data[k] = {"password": v, "inicio": "00:00", "fin": "23:59"}
             return data
-    except:
-        return reiniciar_configuracion_default()
+    except: return reiniciar_configuracion_default()
 
 def guardar_configuracion(diccionario_nuevo):
     if "ADMIN" not in diccionario_nuevo:
         diccionario_nuevo["ADMIN"] = {"password": "1234", "inicio": "00:00", "fin": "23:59"}
-    with open(ARCHIVO_PASSWORDS, 'w') as f:
-        json.dump(diccionario_nuevo, f)
+    with open(ARCHIVO_PASSWORDS, 'w') as f: json.dump(diccionario_nuevo, f)
 
 def obtener_lista_equipos_dinamica():
     config = cargar_configuracion()
-    lista = [k for k in config.keys() if k != "ADMIN"]
-    return sorted(lista)
+    return sorted([k for k in config.keys() if k != "ADMIN"])
 
 def verificar_horario(usuario):
     if usuario == "ADMIN": return True
@@ -74,65 +96,39 @@ def verificar_horario(usuario):
             h_fin = datetime.strptime(datos.get("fin", "23:59"), "%H:%M").time()
             hora_actual = obtener_hora_actual().time()
             return h_inicio <= hora_actual <= h_fin
-        except:
-            return True 
+        except: return True 
     return True
 
 def asegurar_archivos():
-    if not os.path.exists(CARPETA_SOPORTES):
-        os.makedirs(CARPETA_SOPORTES)
-        
-    # --- AUTORREPARACIÓN DE EMPLEADOS ---
-    columnas_emp = ["Equipo", "Nombre", "Cedula"]
-    if not os.path.exists(ARCHIVO_EMPLEADOS):
-        pd.DataFrame(columns=columnas_emp).to_csv(ARCHIVO_EMPLEADOS, index=False)
-    else:
-        try:
-            df = pd.read_csv(ARCHIVO_EMPLEADOS)
-            # Si faltan columnas clave, regeneramos el archivo
-            if 'Nombre' not in df.columns or 'Equipo' not in df.columns:
-                pd.DataFrame(columns=columnas_emp).to_csv(ARCHIVO_EMPLEADOS, index=False)
-        except:
-            pd.DataFrame(columns=columnas_emp).to_csv(ARCHIVO_EMPLEADOS, index=False)
-
-    # --- AUTORREPARACIÓN DE ASISTENCIA ---
-    columnas_asis = ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]
-    if not os.path.exists(ARCHIVO_ASISTENCIA):
-        pd.DataFrame(columns=columnas_asis).to_csv(ARCHIVO_ASISTENCIA, index=False)
-    else:
-        try:
-            df = pd.read_csv(ARCHIVO_ASISTENCIA)
-            if 'Nombre' not in df.columns or 'Fecha' not in df.columns:
-                pd.DataFrame(columns=columnas_asis).to_csv(ARCHIVO_ASISTENCIA, index=False)
-        except:
-            pd.DataFrame(columns=columnas_asis).to_csv(ARCHIVO_ASISTENCIA, index=False)
-
-def cargar_csv(archivo):
-    asegurar_archivos() # Ejecuta la reparación antes de leer
-    try:
-        return pd.read_csv(archivo, dtype=str, keep_default_na=False)
-    except:
-        return pd.DataFrame()
+    if not os.path.exists(CARPETA_SOPORTES): os.makedirs(CARPETA_SOPORTES)
+    # Ya no creamos archivos vacíos aquí, la función blindada se encarga al leer
 
 def guardar_personal(df_nuevo, equipo_actual):
-    df_todos = cargar_csv(ARCHIVO_EMPLEADOS)
-    if not df_todos.empty and 'Equipo' in df_todos.columns:
+    columnas = ["Equipo", "Nombre", "Cedula"]
+    df_todos = cargar_csv_blindado(ARCHIVO_EMPLEADOS, columnas)
+    
+    if not df_todos.empty:
         df_todos = df_todos[df_todos['Equipo'] != equipo_actual]
+    
     df_nuevo['Equipo'] = equipo_actual
+    # Aseguramos orden de columnas
+    df_nuevo = df_nuevo[columnas]
+    
     df_final = pd.concat([df_todos, df_nuevo], ignore_index=True)
     df_final.to_csv(ARCHIVO_EMPLEADOS, index=False)
 
 def guardar_asistencia(df_registro):
-    df_historico = cargar_csv(ARCHIVO_ASISTENCIA)
+    columnas = ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]
+    df_historico = cargar_csv_blindado(ARCHIVO_ASISTENCIA, columnas)
     df_final = pd.concat([df_historico, df_registro], ignore_index=True)
     df_final.to_csv(ARCHIVO_ASISTENCIA, index=False)
 
 def sobrescribir_asistencia_completa(df_completo):
-    cols_reales = ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]
-    for col in cols_reales:
-        if col not in df_completo.columns:
-            df_completo[col] = ""
-    df_final = df_completo[cols_reales]
+    columnas = ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"]
+    # Rellenar columnas faltantes si las hubiera
+    for c in columnas:
+        if c not in df_completo.columns: df_completo[c] = ""
+    df_final = df_completo[columnas]
     df_final.to_csv(ARCHIVO_ASISTENCIA, index=False)
 
 def guardar_soporte(uploaded_file, nombre_persona, fecha):
@@ -141,11 +137,9 @@ def guardar_soporte(uploaded_file, nombre_persona, fecha):
             ext = uploaded_file.name.split('.')[-1].lower()
             nombre_archivo = f"{fecha}_{nombre_persona.replace(' ', '_')}.{ext}"
             ruta_completa = os.path.join(CARPETA_SOPORTES, nombre_archivo)
-            with open(ruta_completa, "wb") as f:
-                f.write(uploaded_file.getbuffer())
+            with open(ruta_completa, "wb") as f: f.write(uploaded_file.getbuffer())
             return ruta_completa
-        except:
-            return None
+        except: return None
     return None
 
 def borrar_historial_completo():
@@ -153,37 +147,27 @@ def borrar_historial_completo():
 
 # --- 3. LÓGICA PRINCIPAL ---
 
-if 'usuario' not in st.session_state:
-    st.session_state['usuario'] = None
-
+if 'usuario' not in st.session_state: st.session_state['usuario'] = None
 config_db = cargar_configuracion()
 
 # --- LOGIN ---
 if st.session_state['usuario'] is None:
     st.title("🔐 Ingreso al Sistema")
-    st.markdown("Por favor ingrese su clave de acceso.")
-    
     col1, col2 = st.columns([1, 2])
     with col1:
-        password_input = st.text_input("Contraseña:", type="password")
+        pwd = st.text_input("Contraseña:", type="password")
         if st.button("Ingresar"):
-            usuario_encontrado = None
-            if password_input == "Admin26":
-                usuario_encontrado = "ADMIN"
+            user_ok = None
+            if pwd == "Admin26": user_ok = "ADMIN"
             else:
-                for equipo, datos in config_db.items():
-                    if isinstance(datos, dict) and password_input == datos.get('password'):
-                        usuario_encontrado = equipo
-                        break
-                    elif isinstance(datos, str) and password_input == datos:
-                        usuario_encontrado = equipo
-                        break
-            
-            if usuario_encontrado:
-                st.session_state['usuario'] = usuario_encontrado
+                for eq, dat in config_db.items():
+                    p_stored = dat.get('password') if isinstance(dat, dict) else dat
+                    if pwd == p_stored: 
+                        user_ok = eq; break
+            if user_ok: 
+                st.session_state['usuario'] = user_ok
                 st.rerun()
-            else:
-                st.error("Contraseña incorrecta.")
+            else: st.error("Incorrecto.")
     st.stop() 
 
 # --- APP ---
@@ -194,11 +178,8 @@ en_horario = verificar_horario(usuario_actual)
 
 with st.sidebar:
     st.write(f"Hola, **{usuario_actual}**")
-    try:
-        hora_co = obtener_hora_actual().strftime("%H:%M")
-        st.caption(f"🕒 Hora CO: {hora_co}")
+    try: st.caption(f"🕒 {obtener_hora_actual().strftime('%H:%M')}")
     except: pass
-    
     if st.button("Cerrar Sesión"):
         st.session_state['usuario'] = None
         st.rerun()
@@ -208,15 +189,15 @@ asegurar_archivos()
 
 # ALERTA ADMIN
 if es_admin:
-    fecha_hoy = obtener_hora_actual().strftime("%Y-%m-%d")
-    df_emp = cargar_csv(ARCHIVO_EMPLEADOS)
-    df_asis = cargar_csv(ARCHIVO_ASISTENCIA)
+    hoy = obtener_hora_actual().strftime("%Y-%m-%d")
+    df_emp = cargar_csv_blindado(ARCHIVO_EMPLEADOS, ["Equipo", "Nombre", "Cedula"])
+    df_asis = cargar_csv_blindado(ARCHIVO_ASISTENCIA, ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"])
     
     if not df_emp.empty:
         df_emp['Key'] = df_emp['Equipo'].astype(str) + df_emp['Nombre'].astype(str)
         hechos = []
         if not df_asis.empty:
-            df_hoy = df_asis[df_asis['Fecha'] == fecha_hoy]
+            df_hoy = df_asis[df_asis['Fecha'] == hoy]
             if not df_hoy.empty:
                 df_hoy['Key'] = df_hoy['Equipo'].astype(str) + df_hoy['Nombre'].astype(str)
                 hechos = df_hoy['Key'].tolist()
@@ -240,103 +221,103 @@ else:
 
 # 1. GESTIÓN
 with tab_personal:
-    if not es_admin and not en_horario:
-        st.error("⛔ Fuera de horario.")
+    if not es_admin and not en_horario: st.error("⛔ Fuera de horario.")
     else:
         st.header("Base de Datos")
-        equipo_gest = st.selectbox("Equipo:", equipos_disponibles, key="sg") if es_admin else usuario_actual
-        if equipo_gest:
-            df_db = cargar_csv(ARCHIVO_EMPLEADOS)
-            df_show = df_db[df_db['Equipo'] == equipo_gest][['Nombre', 'Cedula']] if not df_db.empty and 'Equipo' in df_db.columns else pd.DataFrame(columns=['Nombre', 'Cedula'])
+        eg = st.selectbox("Equipo:", equipos_disponibles, key="sg") if es_admin else usuario_actual
+        if eg:
+            df_db = cargar_csv_blindado(ARCHIVO_EMPLEADOS, ["Equipo", "Nombre", "Cedula"])
+            df_show = df_db[df_db['Equipo'] == eg][['Nombre', 'Cedula']] if not df_db.empty else pd.DataFrame(columns=['Nombre', 'Cedula'])
             df_edit = st.data_editor(df_show, num_rows="dynamic", use_container_width=True, key="edit_pers")
             if st.button("💾 GUARDAR CAMBIOS PERSONAL"):
-                guardar_personal(df_edit, equipo_gest)
+                guardar_personal(df_edit, eg)
                 st.success("✅ Guardado.")
                 st.rerun()
 
 # 2. ASISTENCIA
 with tab_asistencia:
-    if not es_admin and not en_horario:
-        st.error("⛔ Fuera de horario.")
+    if not es_admin and not en_horario: st.error("⛔ Fuera de horario.")
     else:
         st.header("Registro de Asistencia")
         if es_admin:
-            c_eq, c_fe = st.columns(2)
-            with c_eq: equipo_asist = st.selectbox("Equipo:", equipos_disponibles, key="sa")
-            with c_fe: 
-                fecha_dt = st.date_input("📅 Fecha de Registro:", value=obtener_hora_actual().date())
-                fecha = fecha_dt.strftime("%Y-%m-%d")
+            c1, c2 = st.columns(2)
+            ea = c1.selectbox("Equipo:", equipos_disponibles, key="sa")
+            f_dt = c2.date_input("📅 Fecha:", value=obtener_hora_actual().date())
+            fecha = f_dt.strftime("%Y-%m-%d")
         else:
-            equipo_asist = usuario_actual
+            ea = usuario_actual
             fecha = obtener_hora_actual().strftime("%Y-%m-%d")
             st.info(f"📅 HOY: {fecha}")
 
-        if equipo_asist:
-            df_all_emp = cargar_csv(ARCHIVO_EMPLEADOS)
-            df_base = df_all_emp[df_all_emp['Equipo'] == equipo_asist] if not df_all_emp.empty and 'Equipo' in df_all_emp.columns else pd.DataFrame()
-            df_hist = cargar_csv(ARCHIVO_ASISTENCIA)
-            hechos = df_hist[(df_hist['Fecha'] == fecha) & (df_hist['Equipo'] == equipo_asist)]['Nombre'].tolist() if not df_hist.empty and 'Fecha' in df_hist.columns else []
+        if ea:
+            df_all = cargar_csv_blindado(ARCHIVO_EMPLEADOS, ["Equipo", "Nombre", "Cedula"])
+            df_base = df_all[df_all['Equipo'] == ea] if not df_all.empty else pd.DataFrame()
+            df_hist = cargar_csv_blindado(ARCHIVO_ASISTENCIA, ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"])
+            
+            hechos = []
+            if not df_hist.empty:
+                hechos = df_hist[(df_hist['Fecha'] == fecha) & (df_hist['Equipo'] == ea)]['Nombre'].tolist()
+            
             pendientes = df_base[~df_base['Nombre'].isin(hechos)]
             
             if not pendientes.empty:
                 st.info(f"Pendientes: {len(pendientes)}")
-                df_input = pendientes[['Nombre', 'Cedula']].copy()
-                df_input['Estado'] = None
-                df_input['Observacion'] = ""
-                df_input['Soporte'] = None
+                df_in = pendientes[['Nombre', 'Cedula']].copy()
+                df_in['Estado'] = None
+                df_in['Observacion'] = ""
+                df_in['Soporte'] = None
+                
                 edited = st.data_editor(
-                    df_input,
+                    df_in,
                     column_config={
                         "Nombre": st.column_config.Column(disabled=True),
                         "Cedula": st.column_config.Column(disabled=True),
-                        "Estado": st.column_config.SelectboxColumn("Estado", options=["Asiste", "Ausente", "Llegada tarde", "Incapacidad", "Vacaciones"], required=True),
+                        "Estado": st.column_config.SelectboxColumn(options=["Asiste", "Ausente", "Llegada tarde", "Incapacidad", "Vacaciones"], required=True),
                         "Soporte": st.column_config.Column(disabled=True)
                     },
-                    hide_index=True, use_container_width=True, key="edit_assist"
+                    hide_index=True, use_container_width=True, key="edit_asis"
                 )
-                novedades = edited[edited['Estado'].isin(["Llegada tarde", "Incapacidad"])]
+                
+                novs = edited[edited['Estado'].isin(["Llegada tarde", "Incapacidad"])]
                 files = {}
-                if not novedades.empty:
-                    st.warning("⚠️ Cargar soportes (PDF o Imagen):")
+                if not novs.empty:
+                    st.warning("⚠️ Adjuntar soportes:")
                     cols = st.columns(3)
-                    for i, (idx, row) in enumerate(novedades.iterrows()):
+                    for i, (idx, row) in enumerate(novs.iterrows()):
                         with cols[i % 3]:
                             st.markdown(f"**{row['Nombre']}**")
-                            f = st.file_uploader(f"Archivo:", type=["png", "jpg", "jpeg", "pdf"], key=f"f_{idx}")
+                            f = st.file_uploader(f"Archivo:", type=["png","jpg","jpeg","pdf"], key=f"f_{idx}")
                             if f: files[row['Nombre']] = f
+                
                 if st.button("💾 GUARDAR SELECCIONADOS"):
                     to_save = edited.dropna(subset=['Estado']).copy()
                     if not to_save.empty:
                         to_save['Fecha'] = fecha
-                        to_save['Equipo'] = equipo_asist
+                        to_save['Equipo'] = ea
                         paths = []
                         for _, r in to_save.iterrows():
                             nm = r['Nombre']
                             paths.append(guardar_soporte(files.get(nm), nm, fecha) if nm in files else "")
                         to_save['Soporte'] = paths
                         guardar_asistencia(to_save[['Fecha', 'Equipo', 'Nombre', 'Cedula', 'Estado', 'Observacion', 'Soporte']])
-                        st.success(f"✅ Guardado para el {fecha}.")
+                        st.success("✅ Guardado.")
                         st.rerun()
-                    else:
-                        st.warning("Selecciona estados.")
-            else:
-                st.success(f"🎉 Gestionado para el {fecha}.")
+                    else: st.warning("Selecciona estados.")
+            else: st.success("🎉 Todo listo.")
 
 # 3. DASHBOARD
 with tab_visual:
     st.header("📊 Dashboard")
-    df_ver = cargar_csv(ARCHIVO_ASISTENCIA)
+    df_ver = cargar_csv_blindado(ARCHIVO_ASISTENCIA, ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"])
+    
     if not df_ver.empty:
         df_ver['Fecha_dt'] = pd.to_datetime(df_ver['Fecha']).dt.date
         c1, c2 = st.columns(2)
-        with c1:
-            fmin = df_ver['Fecha_dt'].min()
-            fmax = df_ver['Fecha_dt'].max()
-            try: rango = st.date_input("📅 Rango:", [fmin, fmax])
-            except: rango = [fmin, fmax]
-        with c2:
-            eq_fil = st.multiselect("Equipo:", df_ver['Equipo'].unique()) if es_admin else None
-            
+        fmin, fmax = df_ver['Fecha_dt'].min(), df_ver['Fecha_dt'].max()
+        try: rango = c1.date_input("Rango:", [fmin, fmax])
+        except: rango = [fmin, fmax]
+        eq_fil = c2.multiselect("Equipo:", df_ver['Equipo'].unique()) if es_admin else None
+        
         df_fil = df_ver.copy()
         if len(rango) == 2: df_fil = df_fil[(df_fil['Fecha_dt'] >= rango[0]) & (df_fil['Fecha_dt'] <= rango[1])]
         if not es_admin: df_fil = df_fil[df_fil['Equipo'] == usuario_actual]
@@ -345,71 +326,66 @@ with tab_visual:
         if not df_fil.empty:
             tot = len(df_fil)
             asi = len(df_fil[df_fil['Estado'] == 'Asiste'])
-            tar = len(df_fil[df_fil['Estado'] == 'Llegada tarde'])
-            aus = len(df_fil[df_fil['Estado'].isin(['Ausente', 'Incapacidad'])])
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Total", tot)
             k2.metric("% Asis", f"{(asi/tot)*100:.1f}%")
-            k3.metric("Tardes", tar, delta_color="inverse")
-            k4.metric("Faltas", aus, delta_color="inverse")
-            st.divider()
-            st.dataframe(df_fil, use_container_width=True)
-            csv = df_fil.to_csv(index=False).encode('utf-8')
-            st.download_button("⬇️ Descargar CSV", csv, "reporte.csv", "text/csv")
             
             st.divider()
-            st.subheader("👤 Trayectoria")
-            with st.expander("🔍 Consultar Individual"):
-                col = st.selectbox("Colaborador:", df_fil['Nombre'].unique())
-                if col:
-                    df_t = df_fil[df_fil['Nombre'] == col]
-                    st.bar_chart(df_t['Estado'].value_counts())
-                    st.dataframe(df_t[['Fecha', 'Estado', 'Observacion']], use_container_width=True)
-
+            st.dataframe(df_fil, use_container_width=True)
+            st.download_button("⬇️ CSV", df_fil.to_csv(index=False).encode('utf-8'), "reporte.csv", "text/csv")
+            
             st.divider()
-            st.subheader("📂 Soportes")
-            con_sop = df_fil[df_fil['Soporte'].notna() & (df_fil['Soporte'].astype(str).str.len() > 5)]
-            if not con_sop.empty:
-                sel = st.selectbox("Ver:", con_sop['Nombre'] + " - " + con_sop['Fecha'], key="vs")
-                if sel:
-                    r = con_sop[con_sop['Nombre'] + " - " + con_sop['Fecha'] == sel].iloc[0]['Soporte']
-                    if os.path.exists(r):
-                        with open(r, "rb") as f: st.download_button("⬇️ Descargar", f, os.path.basename(r))
-                        if r.endswith(".pdf"): st.info("PDF disponible.")
-                        else: st.image(r, width=400)
+            with st.expander("🔍 Trayectoria Individual"):
+                col = st.selectbox("Nombre:", df_fil['Nombre'].unique())
+                if col:
+                    dft = df_fil[df_fil['Nombre'] == col]
+                    st.bar_chart(dft['Estado'].value_counts())
+                    st.dataframe(dft[['Fecha','Estado','Observacion']])
+            
+            st.divider()
+            with st.expander("📂 Soportes"):
+                con_s = df_fil[df_fil['Soporte'].notna() & (df_fil['Soporte'].astype(str).str.len() > 5)]
+                if not con_s.empty:
+                    s = st.selectbox("Ver:", con_s['Nombre'] + " - " + con_s['Fecha'])
+                    if s:
+                        r = con_s[con_s['Nombre'] + " - " + con_s['Fecha'] == s].iloc[0]['Soporte']
+                        if os.path.exists(r):
+                            with open(r, "rb") as f: st.download_button("Descargar", f, os.path.basename(r))
+                            if r.endswith(".pdf"): st.info("PDF")
+                            else: st.image(r, width=300)
     else: st.info("Sin datos.")
 
 # 4. ADMIN
 if es_admin:
     with tab_admin:
         st.header("🔐 Admin")
-        with st.expander("🔑 EQUIPOS Y HORARIOS"):
-            d_l = []
+        with st.expander("🔑 EQUIPOS"):
+            dl = []
             for t, d in config_db.items():
                 p = d.get('password','') if isinstance(d, dict) else str(d)
                 i = d.get('inicio','00:00') if isinstance(d, dict) else '00:00'
                 f = d.get('fin','23:59') if isinstance(d, dict) else '23:59'
                 try: ti, tf = datetime.strptime(i, "%H:%M").time(), datetime.strptime(f, "%H:%M").time()
                 except: ti, tf = time(0,0), time(23,59)
-                d_l.append({"Usuario/Equipo": t, "Contraseña": p, "Inicio": ti, "Fin": tf})
-            res = st.data_editor(pd.DataFrame(d_l), column_config={"Inicio": st.column_config.TimeColumn(format="HH:mm"), "Fin": st.column_config.TimeColumn(format="HH:mm")}, num_rows="dynamic", key="ec")
-            if st.button("💾 GUARDAR"):
+                dl.append({"Usuario/Equipo": t, "Contraseña": p, "Inicio": ti, "Fin": tf})
+            res = st.data_editor(pd.DataFrame(dl), column_config={"Inicio":st.column_config.TimeColumn(format="HH:mm"),"Fin":st.column_config.TimeColumn(format="HH:mm")}, num_rows="dynamic")
+            if st.button("💾 GUARDAR CONFIG"):
                 new_c = {}
                 for _, r in res.iterrows():
-                    nm = str(r['Usuario/Equipo']).strip()
-                    if nm: new_c[nm] = {"password": str(r['Contraseña']), "inicio": r['Inicio'].strftime("%H:%M") if r['Inicio'] else "00:00", "fin": r['Fin'].strftime("%H:%M") if r['Fin'] else "23:59"}
+                    n = str(r['Usuario/Equipo']).strip()
+                    if n: new_c[n] = {"password": str(r['Contraseña']), "inicio": r['Inicio'].strftime("%H:%M") if r['Inicio'] else "00:00", "fin": r['Fin'].strftime("%H:%M") if r['Fin'] else "23:59"}
                 guardar_configuracion(new_c)
-                st.success("Guardado.")
+                st.success("Ok.")
                 st.rerun()
         
         st.divider()
         st.subheader("🛠️ Corregir")
-        df_full = cargar_csv(ARCHIVO_ASISTENCIA)
+        df_full = cargar_csv_blindado(ARCHIVO_ASISTENCIA, ["Fecha", "Equipo", "Nombre", "Cedula", "Estado", "Observacion", "Soporte"])
         if not df_full.empty:
             df_full.insert(0, "Borrar", False)
-            ed_f = st.data_editor(df_full, hide_index=True, use_container_width=True, key="efa")
+            edf = st.data_editor(df_full, hide_index=True, use_container_width=True, key="edadm")
             if st.button("💾 APLICAR"):
-                sobrescribir_asistencia_completa(ed_f[ed_f["Borrar"] == False])
+                sobrescribir_asistencia_completa(edf[edf["Borrar"]==False])
                 st.success("Hecho.")
                 st.rerun()
             if st.button("🔴 BORRAR TODO"):
